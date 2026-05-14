@@ -35,7 +35,8 @@ export default function Modal({
 
   return (
     <div
-      className={`fixed inset-0 z-[${zIndex}] flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm`}
+      style={{ zIndex }}
+      className="fixed inset-0 flex items-center justify-center bg-cs2-bg-overlay px-4 py-6 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       onClick={(e) => {

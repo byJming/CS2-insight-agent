@@ -93,7 +93,7 @@ export default function LibraryLoadModeModal({ open, onClose, onConfirm, expecte
                   {expectedPreviewLines.length > 8 ? " …" : ""}
                 </span>
               ) : (
-                <span className="mt-1 block text-[10px] text-cs2-amber-on-surface0/90">当前侧栏名单为空。</span>
+                <span className="mt-1 block text-[10px] text-cs2-amber-on-surface/90">当前侧栏名单为空。</span>
               )}
             </span>
           </label>

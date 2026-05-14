@@ -111,7 +111,7 @@ export default function MemeDeathMontageCard({
             checked={allSelected}
             disabled={bundleDisabled}
             onChange={(e) => onBundleToggle(e.target.checked)}
-            className="h-6 w-6 cursor-pointer rounded border-2 border-red-400/60 bg-zinc-900 text-cs2-red-on-surface0 accent-red-500 focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-6 w-6 cursor-pointer rounded border-2 border-red-400/60 bg-zinc-900 text-cs2-red-on-surface accent-red-500 focus:ring-2 focus:ring-red-400 focus:ring-offset-2 focus:ring-offset-zinc-950 disabled:cursor-not-allowed disabled:opacity-50"
           />
         </label>
       </div>

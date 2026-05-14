@@ -173,7 +173,7 @@ export default function ClipCard({
         {inQueue ? (
           "队列"
         ) : ftdEnqueueBlocked ? (
-          <span className="px-0.5 text-[8px] font-bold leading-none text-cs2-amber-on-surface0/90">—</span>
+          <span className="px-0.5 text-[8px] font-bold leading-none text-cs2-amber-on-surface/90">—</span>
         ) : selected ? (
           <Check className="h-3 w-3 text-cs2-text-on-accent" />
         ) : null}

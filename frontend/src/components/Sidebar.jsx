@@ -473,7 +473,7 @@ export default function Sidebar({
                     API 密钥
                   </label>
                   {llmKeySavedOnServer && !llmConfig.api_key?.trim() && (
-                    <p className="mb-1.5 text-[10px] leading-relaxed text-cs2-emerald-on-surface0/90">
+                    <p className="mb-1.5 text-[10px] leading-relaxed text-cs2-emerald-on-surface/90">
                       密钥已在服务器保存（刷新不显示明文）。若要更换，输入新密钥后失焦即可覆盖。
                     </p>
                   )}

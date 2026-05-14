@@ -494,7 +494,7 @@ export default function SettingsPage() {
                     <div>
                       <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-cs2-text-secondary">API 密钥</label>
                       {s.llmKeySavedOnServer && !s.llmConfig.api_key?.trim() && (
-                        <p className="mb-1.5 text-[11px] leading-relaxed text-cs2-emerald-on-surface0/90">
+                        <p className="mb-1.5 text-[11px] leading-relaxed text-cs2-emerald-on-surface/90">
                           密钥已在服务器保存。更换请输入新密钥后失焦保存。
                         </p>
                       )}
