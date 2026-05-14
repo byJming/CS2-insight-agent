@@ -92,27 +92,27 @@ export function MatchListRow({
   const listStatus = classifyDemoStatus(demo);
   const listStatusDot =
     listStatus.kind === "done"
-      ? "bg-emerald-500 shadow-[0_0_5px_#10b981]"
+      ? "bg-cs2-highlight"
       : listStatus.kind === "error"
-        ? "bg-red-500 shadow-[0_0_6px_rgba(239,68,68,0.35)]"
+        ? "bg-cs2-fail"
         : listStatus.kind === "parsing"
           ? "bg-cs2-accent"
           : listStatus.kind === "pending"
-            ? "bg-amber-500"
+            ? "bg-cs2-amber-on-surface"
             : listStatus.kind === "loaded"
-              ? "bg-sky-500"
-              : "bg-zinc-500";
+              ? "bg-cs2-cyan-on-surface"
+              : "bg-cs2-text-muted";
   const listStatusText =
     listStatus.kind === "done"
-      ? "text-emerald-400"
+      ? "text-cs2-emerald-on-surface"
       : listStatus.kind === "error"
-        ? "text-red-400"
+        ? "text-cs2-red-on-surface"
         : listStatus.kind === "parsing"
           ? "text-cs2-accent"
           : listStatus.kind === "pending"
             ? "text-cs2-amber-on-surface"
             : listStatus.kind === "loaded"
-              ? "text-sky-300"
+              ? "text-cs2-cyan-on-surface"
               : "text-cs2-text-secondary";
 
   return (
@@ -228,13 +228,13 @@ export function MatchListRow({
           >
             <MessageSquare className="h-4 w-4" />
           </button>
-          <button onClick={() => onPlay(demo.id)} className="p-2 text-emerald-400 hover:bg-emerald-500/10 rounded-md transition-colors" title="观看">
+          <button onClick={() => onPlay(demo.id)} className="p-2 text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface rounded-md transition-colors" title="观看">
             <Play className="h-4 w-4 fill-current" />
           </button>
           <button onClick={() => onOpenFile(demo.id)} className="p-2 text-cs2-text-secondary hover:bg-cs2-bg-input/50 rounded-md transition-colors" title="定位">
             <FolderSearch className="h-4 w-4" />
           </button>
-          <button onClick={() => onDelete(demo.id, demo.filename)} className="p-2 text-red-400 hover:bg-red-500/10 rounded-md transition-colors" title="删除">
+          <button onClick={() => onDelete(demo.id, demo.filename)} className="p-2 text-cs2-red-on-surface hover:bg-cs2-red-surface rounded-md transition-colors" title="删除">
             <Trash2 className="h-4 w-4" />
           </button>
         </div>
@@ -326,7 +326,7 @@ export default function MatchCard({
       }
     });
     if (k4 > 0) tags.push({ label: `4K x ${k4}`, color: "bg-cs2-accent/20 text-cs2-accent" });
-    if (k5 > 0) tags.push({ label: `5K x ${k5}`, color: "bg-red-500/20 text-red-400" });
+    if (k5 > 0) tags.push({ label: `5K x ${k5}`, color: "bg-cs2-red-surface text-cs2-red-on-surface" });
     return tags;
   };
 
@@ -335,14 +335,14 @@ export default function MatchCard({
   const gridStatus = classifyDemoStatus(demo);
   const gridStatusBadgeClass =
     {
-      done: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-      error: "bg-red-500/10 text-red-400 border-red-500/20",
+      done: "bg-cs2-emerald-surface text-cs2-emerald-on-surface border-cs2-emerald-surface",
+      error: "bg-cs2-red-surface text-cs2-red-on-surface border-cs2-red-surface",
       parsing: "bg-cs2-accent/10 text-cs2-accent border-cs2-accent/25",
-      loaded: "bg-sky-500/10 text-sky-300 border-sky-500/25",
-      pending: "bg-amber-500/10 text-cs2-amber-on-surface border-amber-500/25",
-      meta_missing: "bg-zinc-500/10 text-cs2-text-secondary border-zinc-500/20",
-      unknown: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-    }[gridStatus.kind] || "bg-blue-500/10 text-blue-400 border-blue-500/20";
+      loaded: "bg-cs2-cyan-surface text-cs2-cyan-on-surface border-cs2-cyan-surface",
+      pending: "bg-cs2-amber-surface text-cs2-amber-on-surface border-cs2-amber-surface",
+      meta_missing: "bg-cs2-bg-input text-cs2-text-secondary border-cs2-border-subtle",
+      unknown: "bg-cs2-bg-hover text-cs2-text-secondary border-cs2-border",
+    }[gridStatus.kind] || "bg-cs2-bg-hover text-cs2-text-secondary border-cs2-border";
 
   const handleSaveRemark = () => {
     onUpdateRemark?.(demo.id, remarkDraft);
@@ -391,9 +391,9 @@ export default function MatchCard({
             </div>
 
             <div className="flex gap-1.5 opacity-0 transition-opacity group-hover:opacity-100" onClick={e => e.stopPropagation()}>
-              <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-emerald-500/50 bg-cs2-bg-overlay text-emerald-400 hover:bg-emerald-500 hover:text-cs2-text-primary transition-all"><Play className="h-4 w-4 fill-current" /></button>
+              <button onClick={() => onPlay(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-emerald-surface bg-cs2-bg-overlay text-cs2-emerald-on-surface hover:bg-cs2-emerald-surface hover:text-cs2-text-primary transition-all"><Play className="h-4 w-4 fill-current" /></button>
               <button onClick={() => onOpenFile(demo.id)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-border bg-cs2-bg-overlay text-cs2-text-primary hover:bg-cs2-bg-hover hover:text-cs2-text-on-accent transition-all"><FolderSearch className="h-4 w-4" /></button>
-              <button onClick={() => onDelete(demo.id, demo.filename)} className="flex h-8 w-8 items-center justify-center rounded-md border border-red-500/50 bg-cs2-bg-overlay text-red-400 hover:bg-red-500 hover:text-cs2-text-primary transition-all"><Trash2 className="h-4 w-4" /></button>
+              <button onClick={() => onDelete(demo.id, demo.filename)} className="flex h-8 w-8 items-center justify-center rounded-md border border-cs2-red-surface bg-cs2-bg-overlay text-cs2-red-on-surface hover:bg-cs2-red-surface hover:text-cs2-text-primary transition-all"><Trash2 className="h-4 w-4" /></button>
             </div>
           </div>
 

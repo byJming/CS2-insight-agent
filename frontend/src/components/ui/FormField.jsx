@@ -8,6 +8,7 @@ export default function FormField({
   required,
   children,
   className = "",
+  ...inputProps
 }) {
   return (
     <div className={`flex flex-col gap-2 ${className}`}>
@@ -17,7 +18,7 @@ export default function FormField({
           {required && <span className="ml-0.5 text-cs2-text-error">*</span>}
         </label>
       )}
-      {children || <Input error={error} />}
+      {children ?? <Input error={error} required={required} {...inputProps} />}
       {error && (
         <div className="flex items-center gap-1 text-[11px] text-cs2-text-error">
           <AlertCircle className="h-3.5 w-3.5 shrink-0" />

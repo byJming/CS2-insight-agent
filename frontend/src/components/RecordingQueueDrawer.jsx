@@ -168,7 +168,7 @@ export function PovSection({ item, updateItemPacing }) {
   if (isClipPacingAndPovLocked(item.clipData)) {
     const wholeRound = isRoundTimelineRoundClip(item.clipData);
     return (
-      <p className="rounded border border-amber-500/15 bg-cs2-amber-surface px-2 py-1.5 text-[10px] leading-relaxed text-cs2-text-muted">
+      <p className="rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] leading-relaxed text-cs2-text-muted">
         {wholeRound ? (
           <>
             当前为<strong className="font-semibold text-cs2-text-secondary">整回合时间线</strong>
@@ -260,8 +260,8 @@ export function PovSection({ item, updateItemPacing }) {
             onClick={() => commit({ killer_pov: !killerPovEnabled })}
             className={`flex w-full items-center gap-1.5 rounded border px-2 py-1.5 text-[10px] font-semibold transition-colors ${
               killerPovEnabled
-                ? "border-amber-500/40 bg-cs2-amber-surface text-amber-300 hover:bg-cs2-amber-surface"
-                : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-amber-500/30 hover:text-amber-300"
+                ? "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface hover:bg-cs2-amber-surface"
+                : "border-cs2-border bg-cs2-bg-hover text-cs2-text-secondary hover:border-cs2-amber-surface hover:text-cs2-amber-on-surface"
             }`}
           >
             {killerPovEnabled ? <Eye className="h-3 w-3 shrink-0" /> : <EyeOff className="h-3 w-3 shrink-0" />}
@@ -277,7 +277,7 @@ export function PovSection({ item, updateItemPacing }) {
               </span>
             ) : null}
             {killerPovEnabled && (
-              <span className="ml-auto font-mono text-[9px] text-amber-400/70">
+              <span className="ml-auto font-mono text-[9px] text-cs2-amber-on-surface/70">
                 -{killPre.toFixed(1)}s / +{killPost.toFixed(1)}s
               </span>
             )}
@@ -311,7 +311,7 @@ export function PovSection({ item, updateItemPacing }) {
       )}
 
       {killerPovEnabled && canKillerPov && (
-        <div className="space-y-2 rounded border border-amber-500/15 bg-cs2-amber-surface p-2">
+        <div className="space-y-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface p-2">
           <PacingSliderRow
             label="击杀前预留 (秒) · 击杀者视角"
             value={killPre}
@@ -319,7 +319,7 @@ export function PovSection({ item, updateItemPacing }) {
             max={5}
             step={0.5}
             accent="accent-amber-500"
-            valueTextClass="text-amber-300"
+            valueTextClass="text-cs2-amber-on-surface"
             onChange={(n) => commit({ killer_pov_pre_sec: n })}
           />
           <PacingSliderRow
@@ -329,7 +329,7 @@ export function PovSection({ item, updateItemPacing }) {
             max={5}
             step={0.5}
             accent="accent-amber-500"
-            valueTextClass="text-amber-300"
+            valueTextClass="text-cs2-amber-on-surface"
             onChange={(n) => commit({ killer_pov_post_sec: n })}
           />
         </div>
@@ -477,8 +477,8 @@ export function GlobalPacingPanel({
             className={
               "flex h-8 w-full min-w-0 flex-nowrap items-center justify-center gap-1 whitespace-nowrap rounded border px-1.5 text-[10px] font-semibold leading-none transition-colors sm:gap-1.5 sm:px-2 sm:text-[11px] disabled:cursor-not-allowed disabled:opacity-40 " +
               (allVictimPovOn
-                ? "border-zinc-500/40 bg-zinc-900/40 text-cs2-text-primary hover:border-zinc-400/55 hover:bg-zinc-900/60"
-                : "border-cyan-500/35 bg-cs2-cyan-surface text-cs2-cyan-on-surface hover:border-cyan-400/60 hover:bg-cs2-cyan-surface")
+                ? "border-cs2-border bg-cs2-bg-hover text-cs2-text-primary hover:border-cs2-border-subtle hover:bg-cs2-bg-active"
+                : "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface hover:border-cs2-cyan-on-surface/60 hover:bg-cs2-cyan-surface")
             }
           >
             {allVictimPovOn ? (
@@ -512,8 +512,8 @@ export function GlobalPacingPanel({
             className={
               "flex h-8 w-full min-w-0 flex-nowrap items-center justify-center gap-1 whitespace-nowrap rounded border px-1.5 text-[10px] font-semibold leading-none transition-colors sm:gap-1.5 sm:px-2 sm:text-[11px] disabled:cursor-not-allowed disabled:opacity-40 " +
               (allKillerPovOn
-                ? "border-zinc-500/40 bg-zinc-900/40 text-cs2-text-primary hover:border-zinc-400/55 hover:bg-zinc-900/60"
-                : "border-amber-500/35 bg-cs2-amber-surface text-cs2-amber-on-surface hover:border-amber-400/60 hover:bg-cs2-amber-surface")
+                ? "border-cs2-border bg-cs2-bg-hover text-cs2-text-primary hover:border-cs2-border-subtle hover:bg-cs2-bg-active"
+                : "border-cs2-amber-surface bg-cs2-amber-surface text-cs2-amber-on-surface hover:border-cs2-amber-on-surface/60 hover:bg-cs2-amber-surface")
             }
           >
             {allKillerPovOn ? (
@@ -526,7 +526,7 @@ export function GlobalPacingPanel({
               <span
                 className={
                   "shrink-0 font-mono tabular-nums text-[9px] " +
-                  (allKillerPovOn ? "text-cs2-text-secondary/90" : "text-amber-300/80")
+                  (allKillerPovOn ? "text-cs2-text-secondary/90" : "text-cs2-amber-on-surface/80")
                 }
               >
                 ({killerPovEligible})
@@ -614,10 +614,10 @@ function QueueItemCard({
         ) : null}
         {hasScorePair ? (
           <>
-            <span className="rounded bg-sky-500/15 px-1.5 py-px font-mono text-[10px] font-semibold text-sky-200">
+            <span className="rounded bg-cs2-cyan-surface px-1.5 py-px font-mono text-[10px] font-semibold text-cs2-cyan-on-surface">
               CT {own}
             </span>
-            <span className="rounded bg-amber-500/15 px-1.5 py-px font-mono text-[10px] font-semibold text-cs2-amber-on-surface">
+            <span className="rounded bg-cs2-amber-surface px-1.5 py-px font-mono text-[10px] font-semibold text-cs2-amber-on-surface">
               T {opp}
             </span>
           </>
@@ -659,7 +659,7 @@ function QueueItemCard({
       ) : null}
       {Array.isArray(item.freezeToDeathQueueRounds) &&
       item.freezeToDeathQueueRounds.length > 0 ? (
-        <p className="mt-0.5 font-mono text-[10px] text-amber-400/85">
+        <p className="mt-0.5 font-mono text-[10px] text-cs2-amber-on-surface/85">
           回合合集含回合：{item.freezeToDeathQueueRounds.join("、")}
         </p>
       ) : null}
@@ -667,7 +667,7 @@ function QueueItemCard({
       {/* 可展开区：节奏微调 */}
       {pacingExpanded ? (
         isClipPacingAndPovLocked(cd) ? (
-          <p className="mt-2 rounded border border-amber-500/20 bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">
+          <p className="mt-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">
             {isRoundTimelineRoundClip(cd)
               ? "整回合时间线为固定 tick 窗口，单条剪辑节奏与全局击杀前/击杀后预留不生效。"
               : "回合死亡合集为固定分段合辑，单条剪辑节奏与全局击杀前/击杀后预留不生效。"}
@@ -705,8 +705,8 @@ function QueueItemCard({
           onClick={onTogglePov}
           className={`flex min-w-0 items-center gap-1 rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
             povExpanded
-              ? "border-sky-500/55 bg-sky-500/15 text-sky-200"
-              : "border-sky-500/30 bg-sky-500/5 text-sky-300/90 hover:bg-sky-500/10"
+              ? "border-cs2-cyan-surface bg-cs2-cyan-surface text-cs2-cyan-on-surface"
+              : "border-cs2-cyan-surface/50 bg-cs2-cyan-surface/30 text-cs2-cyan-on-surface/90 hover:bg-cs2-cyan-surface"
           }`}
         >
           <Eye className="h-3 w-3 shrink-0" />
@@ -823,7 +823,7 @@ export function RecordingQueuePanel({
             <button
               type="button"
               onClick={onClear}
-              className="w-full rounded-md border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-red-500/40 hover:text-cs2-red-on-surface"
+              className="w-full rounded-md border border-cs2-border py-2 text-xs font-semibold text-cs2-text-secondary hover:border-cs2-red-surface hover:text-cs2-red-on-surface"
             >
               清空队列
             </button>
@@ -841,7 +841,7 @@ export function RecordingQueuePanel({
             <button
               type="button"
               onClick={() => void onAbortBatch()}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-500/50 bg-red-500/10 py-3 text-sm font-bold text-cs2-red-on-surface transition-all hover:border-red-400 hover:bg-red-500/20"
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-cs2-red-surface bg-cs2-red-surface py-3 text-sm font-bold text-cs2-red-on-surface transition-all hover:border-cs2-red-on-surface/60 hover:bg-cs2-red-surface"
             >
               <OctagonX className="h-4 w-4 shrink-0" />
               中止录制

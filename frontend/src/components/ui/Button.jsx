@@ -18,13 +18,14 @@ const sizes = {
 export default function Button({
   variant = "primary",
   size = "md",
+  type = "button",
   children,
   className = "",
   ...rest
 }) {
   return (
     <button
-      type="button"
+      type={type}
       className={`inline-flex items-center justify-center transition-colors disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-cs2-accent/50 focus-visible:ring-offset-2 focus-visible:ring-offset-cs2-bg-page ${variants[variant]} ${sizes[size]} ${className}`}
       {...rest}
     >

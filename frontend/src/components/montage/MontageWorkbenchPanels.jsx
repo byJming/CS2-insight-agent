@@ -41,25 +41,25 @@ function montageAiExplainText(clip) {
 }
 
 const VARIANT_BAR = {
-  ace: "bg-rose-500",
-  multikill: "bg-amber-500",
-  pov: "bg-sky-500",
-  fail: "bg-red-500",
-  compilation: "bg-amber-500",
-  highlight: "bg-emerald-500",
-  timeline: "bg-cyan-500",
-  neutral: "bg-zinc-600",
+  ace: "bg-cs2-rose-on-surface",
+  multikill: "bg-cs2-amber-on-surface",
+  pov: "bg-cs2-cyan-on-surface",
+  fail: "bg-cs2-fail",
+  compilation: "bg-cs2-amber-on-surface",
+  highlight: "bg-cs2-highlight",
+  timeline: "bg-cs2-cyan-on-surface",
+  neutral: "bg-cs2-text-muted",
 };
 
 const VARIANT_RING = {
-  ace: "border-rose-500/45 bg-gradient-to-br from-cs2-rose-surface to-cs2-bg-card text-cs2-rose-on-surface",
-  multikill: "border-amber-500/40 bg-gradient-to-br from-cs2-amber-surface to-cs2-bg-card text-cs2-amber-on-surface",
-  pov: "border-sky-500/35 bg-gradient-to-br from-sky-950/40 to-cs2-bg-card text-cs2-cyan-on-surface",
-  fail: "border-red-500/45 bg-gradient-to-br from-cs2-red-surface to-cs2-bg-card text-cs2-red-on-surface",
-  compilation: "border-amber-500/45 bg-gradient-to-br from-cs2-amber-surface to-cs2-bg-card text-cs2-amber-on-surface",
-  highlight: "border-emerald-500/40 bg-gradient-to-br from-cs2-emerald-surface to-cs2-bg-card text-cs2-emerald-on-surface",
-  timeline: "border-cyan-500/45 bg-gradient-to-br from-cs2-cyan-surface to-cs2-bg-card text-cs2-cyan-on-surface",
-  neutral: "border-cs2-border bg-zinc-900/90 text-cs2-text-primary",
+  ace: "border-cs2-rose-surface bg-gradient-to-br from-cs2-rose-surface to-cs2-bg-card text-cs2-rose-on-surface",
+  multikill: "border-cs2-amber-surface bg-gradient-to-br from-cs2-amber-surface to-cs2-bg-card text-cs2-amber-on-surface",
+  pov: "border-cs2-cyan-surface bg-gradient-to-br from-cs2-cyan-surface to-cs2-bg-card text-cs2-cyan-on-surface",
+  fail: "border-cs2-red-surface bg-gradient-to-br from-cs2-red-surface to-cs2-bg-card text-cs2-red-on-surface",
+  compilation: "border-cs2-amber-surface bg-gradient-to-br from-cs2-amber-surface to-cs2-bg-card text-cs2-amber-on-surface",
+  highlight: "border-cs2-emerald-surface bg-gradient-to-br from-cs2-emerald-surface to-cs2-bg-card text-cs2-emerald-on-surface",
+  timeline: "border-cs2-cyan-surface bg-gradient-to-br from-cs2-cyan-surface to-cs2-bg-card text-cs2-cyan-on-surface",
+  neutral: "border-cs2-border bg-cs2-bg-elevated text-cs2-text-primary",
 };
 
 export function CollapsibleSection({ title, hint, defaultOpen = false, children }) {
@@ -587,14 +587,14 @@ export function MontageOrchestrationTimeline({
                       {/* 次级状态微标区 */}
                       <div className="mt-2 flex flex-wrap items-center gap-1.5">
                         {victimSegCount > 0 ? (
-                          <span className="rounded bg-violet-500/10 px-2 py-0.5 text-xs font-medium text-violet-300" title={povTip || undefined}>
+                          <span className="rounded bg-cs2-violet-surface px-2 py-0.5 text-xs font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
                             受害者视角 ×{victimSegCount}
                           </span>
                         ) : null}
                         <span
                           className={`rounded px-2 py-0.5 text-xs font-medium ${
                             perspectivePrimary !== "观战视角"
-                              ? "bg-sky-500/10 text-sky-300"
+                              ? "bg-cs2-cyan-surface text-cs2-cyan-on-surface"
                               : "bg-cs2-bg-input text-cs2-text-muted"
                           }`}
                           title={perspectiveZh}
@@ -602,7 +602,7 @@ export function MontageOrchestrationTimeline({
                           {perspectivePrimary}
                         </span>
                         {clip.pov_hud_enabled === true ? (
-                          <span className="rounded bg-sky-500/10 px-2 py-0.5 text-xs font-bold text-sky-300">HUD</span>
+                          <span className="rounded bg-cs2-cyan-surface px-2 py-0.5 text-xs font-bold text-cs2-cyan-on-surface">HUD</span>
                         ) : null}
                       </div>
 
@@ -786,7 +786,7 @@ export function MontageMaterialPoolCard({
               </span>
             ) : null}
             {victimSegCount > 0 ? (
-              <span className="ml-auto rounded bg-violet-500/10 px-1.5 py-0.5 text-[11px] font-medium text-violet-300" title={povTip || undefined}>
+              <span className="ml-auto rounded bg-cs2-violet-surface px-1.5 py-0.5 text-[11px] font-medium text-cs2-violet-on-surface" title={povTip || undefined}>
                 POV ×{victimSegCount}
               </span>
             ) : null}

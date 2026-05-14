@@ -8,8 +8,9 @@ const PREFIX = "cs2-session-";
  * @template T
  * @param {string} key sessionStorage key
  * @param {T | (() => T)} initialValue
+ * @param {{ storageTransform?: (value: T) => unknown }} [options]
  */
-export default function useSessionState(key, initialValue) {
+export default function useSessionState(key, initialValue, { storageTransform } = {}) {
   const storageKey = PREFIX + key;
 
   const [state, setState] = useState(() => {
@@ -25,10 +26,11 @@ export default function useSessionState(key, initialValue) {
       if (state === null || state === undefined) {
         sessionStorage.removeItem(storageKey);
       } else {
-        sessionStorage.setItem(storageKey, JSON.stringify(state));
+        const value = storageTransform ? storageTransform(state) : state;
+        sessionStorage.setItem(storageKey, JSON.stringify(value));
       }
     } catch { /* quota exceeded, ignore */ }
-  }, [storageKey, state]);
+  }, [storageKey, state, storageTransform]);
 
   const reset = useCallback(() => {
     try { sessionStorage.removeItem(storageKey); } catch { /* ignore */ }

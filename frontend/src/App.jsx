@@ -60,26 +60,30 @@ export default function App() {
   });
 
   /** @type {[Array<{ filename: string, path: string, players: any[], match_meta: any }>|null, Function]} */
-  const [uploadedDemos, setUploadedDemos] = useSessionState("uploadedDemos", null);
+  const stripCachedResult = useCallback((demos) => {
+    if (!Array.isArray(demos)) return demos;
+    return demos.map(({ cached_result, ...rest }) => rest);
+  }, []);
+  const [uploadedDemos, setUploadedDemos, resetUploadedDemos] = useSessionState("uploadedDemos", null, { storageTransform: stripCachedResult });
 
   /**
    * 与 uploadedDemos 等长；未解析的槽位为 null。
    * 已解析槽位结构: { players: { [playerName]: { clips, match_meta } }, demo_path, demo_filename }
    */
   const [parsedMatches, setParsedMatches] = useState(null);
-  const [currentMatchIndex, setCurrentMatchIndex] = useSessionState("currentMatchIndex", 0);
+  const [currentMatchIndex, setCurrentMatchIndex, resetCurrentMatchIndex] = useSessionState("currentMatchIndex", 0);
   const currentMatchIndexRef = useRef(0);
   useEffect(() => {
     currentMatchIndexRef.current = currentMatchIndex;
   }, [currentMatchIndex]);
 
   /** 每场 Demo 独立的多选玩家列表（索引 -> string[]） */
-  const [selectedPlayers, setSelectedPlayers] = useSessionState("selectedPlayers", {});
+  const [selectedPlayers, setSelectedPlayers, resetSelectedPlayers] = useSessionState("selectedPlayers", {});
   /** 每场「回合合集」勾选：空 → 请求里发 null（整局合规非赛后）；非空 → 只解析所选回合 */
   const [freezeToDeathRoundsByMatch, setFreezeToDeathRoundsByMatch] = useState({});
 
   /** 当前 Demo 正在查看的玩家 Tab（索引 -> playerName） */
-  const [activePlayerTabs, setActivePlayerTabs] = useSessionState("activePlayerTabs", {});
+  const [activePlayerTabs, setActivePlayerTabs, resetActivePlayerTabs] = useSessionState("activePlayerTabs", {});
 
   /** 与 clip.client_clip_uid 对应（非后端 clip_id） */
   const [selectedClientClipUids, setSelectedClientClipUids] = useState(new Set());
@@ -1748,12 +1752,12 @@ export default function App() {
   );
 
   const handleResetDemo = useCallback(() => {
-    setUploadedDemos(null);
+    resetUploadedDemos();
     setParsedMatches(null);
     setLibraryDemoIdsByIndex({});
-    setCurrentMatchIndex(0);
-    setSelectedPlayers({});
-    setActivePlayerTabs({});
+    resetCurrentMatchIndex();
+    resetSelectedPlayers();
+    resetActivePlayerTabs();
     setFreezeToDeathRoundsByMatch({});
     setSelectedClientClipUids(new Set());
     setProgressText("");
