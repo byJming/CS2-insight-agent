@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import useSessionState from "./hooks/useSessionState";
 import axios from "axios";
 import { Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { AppShellProvider } from "./context/AppShellContext";
@@ -41,7 +42,7 @@ const DEFAULT_SPEC_PLAYER_VERIFY = Object.freeze({
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [aiMode, setAiMode] = useState(false);
+  const [aiMode, setAiMode] = useSessionState("aiMode", false);
   const [obsConfig, setObsConfig] = useState({ host: "localhost", port: 4455, password: "" });
   /** 服务器是否已有 OBS 密码（GET /api/config 返回脱敏或本地刚保存成功） */
   const [obsHasSavedPassword, setObsHasSavedPassword] = useState(false);
@@ -59,26 +60,26 @@ export default function App() {
   });
 
   /** @type {[Array<{ filename: string, path: string, players: any[], match_meta: any }>|null, Function]} */
-  const [uploadedDemos, setUploadedDemos] = useState(null);
+  const [uploadedDemos, setUploadedDemos] = useSessionState("uploadedDemos", null);
 
   /**
    * 与 uploadedDemos 等长；未解析的槽位为 null。
    * 已解析槽位结构: { players: { [playerName]: { clips, match_meta } }, demo_path, demo_filename }
    */
   const [parsedMatches, setParsedMatches] = useState(null);
-  const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
+  const [currentMatchIndex, setCurrentMatchIndex] = useSessionState("currentMatchIndex", 0);
   const currentMatchIndexRef = useRef(0);
   useEffect(() => {
     currentMatchIndexRef.current = currentMatchIndex;
   }, [currentMatchIndex]);
 
   /** 每场 Demo 独立的多选玩家列表（索引 -> string[]） */
-  const [selectedPlayers, setSelectedPlayers] = useState({});
+  const [selectedPlayers, setSelectedPlayers] = useSessionState("selectedPlayers", {});
   /** 每场「回合合集」勾选：空 → 请求里发 null（整局合规非赛后）；非空 → 只解析所选回合 */
   const [freezeToDeathRoundsByMatch, setFreezeToDeathRoundsByMatch] = useState({});
 
   /** 当前 Demo 正在查看的玩家 Tab（索引 -> playerName） */
-  const [activePlayerTabs, setActivePlayerTabs] = useState({});
+  const [activePlayerTabs, setActivePlayerTabs] = useSessionState("activePlayerTabs", {});
 
   /** 与 clip.client_clip_uid 对应（非后端 clip_id） */
   const [selectedClientClipUids, setSelectedClientClipUids] = useState(new Set());
@@ -2142,12 +2143,12 @@ export default function App() {
 
   return (
     <AppShellProvider value={shell}>
-      <div className="relative flex h-screen overflow-hidden bg-cs2-bg-dark">
+      <div className="relative flex h-screen overflow-hidden bg-cs2-bg-page">
         {libraryLoadingOverlay && (
-          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/55 backdrop-blur-[1px]">
-            <div className="flex items-center gap-3 rounded-lg border border-white/10 bg-cs2-bg-card px-4 py-3 shadow-2xl">
-              <Loader2 className="h-5 w-5 animate-spin text-cs2-orange" />
-              <p className="text-sm font-medium text-zinc-200">{libraryLoadingText}</p>
+          <div className="absolute inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-[1px]">
+            <div className="flex items-center gap-3 rounded-lg border border-cs2-border bg-cs2-bg-card px-4 py-3 shadow-2xl">
+              <Loader2 className="h-5 w-5 animate-spin text-cs2-accent" />
+              <p className="text-sm font-medium text-cs2-text-primary">{libraryLoadingText}</p>
             </div>
           </div>
         )}
@@ -2174,7 +2175,7 @@ export default function App() {
             className="pointer-events-none fixed inset-x-0 bottom-0 z-[60] flex justify-center px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2 sm:px-6"
             aria-live="polite"
           >
-            <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-black/50">
+            <div className="pointer-events-auto w-full max-w-lg shadow-2xl shadow-cs2-shadow">
               <ProgressBar
                 text={progressText || (batchRecording ? "正在批量录制…" : "")}
                 active={anyDemoParsing}
