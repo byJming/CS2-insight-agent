@@ -523,7 +523,7 @@ export default function RecordWarmupModal({
 
           <section aria-labelledby="sec-launch">
             <SectionHeader en="Launch & console" zh="启动与控制台" />
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-cs2-text-muted">
               命令行与控制台
             </p>
             <Cs2LaunchConsoleFields

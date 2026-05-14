@@ -7,7 +7,7 @@ import {
   Music,
   Film,
   Trash2,
-  // ScanEye, // 雷达覆盖 UI 已隐藏，恢复区块时一并取消注释
+  ScanEye,
   X,
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
@@ -214,13 +214,25 @@ export function MontageStyleConsole({
   ];
 
   return (
-    <aside className="flex min-h-0 w-full min-w-0 flex-col border-white/10 bg-gradient-to-b from-zinc-950/80 to-black/40 xl:border-l">
-      <div className="shrink-0 border-b border-white/10 px-3 py-2.5">
-        <p className="text-[12px] font-bold text-white">合辑成片控制台</p>
-        <p className="mt-0.5 text-[10px] text-zinc-500">
-          {/* BGM、片头片尾与雷达覆盖；转场在中间「合集结构」里点衔接处编辑 */}
-          BGM、片头片尾；转场在中间「合集结构」里点衔接处编辑
-        </p>
+    <aside className="flex min-h-0 w-full min-w-0 flex-col border-cs2-border bg-cs2-surface-1 xl:border-l">
+      <div className="shrink-0 border-b border-cs2-border-subtle p-4">
+        <p className="text-sm font-bold text-cs2-text-primary tracking-wide">合辑成片控制台</p>
+        <div className="mt-3 flex gap-1.5">
+          {tabItems.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActiveTab(t.id)}
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all ${
+                activeTab === t.id
+                  ? "bg-cs2-accent text-cs2-text-on-accent shadow-sm"
+                  : "text-cs2-text-muted hover:bg-cs2-surface-2 hover:text-cs2-text-secondary"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
