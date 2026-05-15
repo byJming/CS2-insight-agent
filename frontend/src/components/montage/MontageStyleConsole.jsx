@@ -7,7 +7,6 @@ import {
   Music,
   Film,
   Trash2,
-  ScanEye,
   X,
 } from "lucide-react";
 import { CollapsibleSection } from "./MontageWorkbenchPanels";
@@ -17,15 +16,6 @@ function pathBasename(path) {
   if (!s) return "";
   const parts = s.split(/[/\\]/);
   return parts[parts.length - 1] || s;
-}
-
-function StyleBlockTitle({ title, subtitle }) {
-  return (
-    <div className="border-b border-cs2-border-subtle pb-2.5">
-      <h3 className="text-xs font-bold uppercase tracking-wider text-cs2-accent">{title}</h3>
-      {subtitle ? <p className="mt-1 text-xs text-cs2-text-muted">{subtitle}</p> : null}
-    </div>
-  );
 }
 
 const IMAGE_EXTS = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tiff"]);
@@ -166,10 +156,6 @@ export function MontageStyleConsole({
   onOutroDurationChange,
   onMediaDropHint,
   onFilePick,
-  // overlay
-  radarOverlayEnabled,
-  onRadarOverlayEnabledChange,
-  hasPovClips = false,
   // export footer
   clipCount,
   durationText,
@@ -209,7 +195,6 @@ export function MontageStyleConsole({
   const [activeTab, setActiveTab] = useState("media");
   const tabItems = [
     { id: "media", label: "媒体资源" },
-    { id: "overlay", label: "覆盖层" },
     { id: "export", label: "导出设置" },
   ];
 
@@ -407,42 +392,6 @@ export function MontageStyleConsole({
               onImageDurationChange={onOutroDurationChange}
             />
           </CollapsibleSection>)}
-
-          {activeTab === "overlay" && (<section className="space-y-3">
-            <StyleBlockTitle title="画面覆盖及增强" subtitle="当前可用的引擎渲染叠层" />
-            <div
-              className={`flex items-center justify-between gap-3 rounded-xl border p-3.5 transition-all ${
-                hasPovClips
-                  ? "border-cs2-border-subtle bg-cs2-surface-1 hover:border-cs2-border-focus"
-                  : "border-cs2-border-subtle bg-cs2-surface-1/30 opacity-50"
-              }`}
-              title={hasPovClips ? "" : "需要至少一个 POV HUD 录制的片段才能启用智能雷达覆盖"}
-            >
-              <div className="flex items-center gap-3">
-                <ScanEye className={`h-5 w-5 shrink-0 ${hasPovClips ? "text-sky-400" : "text-cs2-text-muted"}`} aria-hidden />
-                <div>
-                  <p className="text-xs font-bold text-cs2-text-primary">回放沉浸式小地图 / 雷达叠层</p>
-                  <p className="text-xs text-cs2-text-muted mt-0.5">
-                    {hasPovClips ? "智能解析 Demo 坐标矩阵生成高还原游戏雷达" : "需引入带有 POV HUD 标识的录制片段"}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={!hasPovClips}
-                onClick={() => hasPovClips && onRadarOverlayEnabledChange(!radarOverlayEnabled)}
-                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-all shadow-sm ${
-                  !hasPovClips
-                    ? "cursor-not-allowed border border-cs2-border-subtle bg-cs2-bg-input text-cs2-text-muted"
-                    : radarOverlayEnabled
-                    ? "bg-cs2-accent text-cs2-text-on-accent shadow-glow-accent"
-                    : "border border-cs2-border-subtle bg-cs2-surface-2 text-cs2-text-secondary hover:text-cs2-text-primary"
-                }`}
-              >
-                {radarOverlayEnabled && hasPovClips ? "已开启" : "未开启"}
-              </button>
-            </div>
-          </section>)}
 
           {activeTab === "export" && (<CollapsibleSection
             title={

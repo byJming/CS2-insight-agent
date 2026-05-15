@@ -15,9 +15,12 @@ import {
 
 /** 未写入配置时的展示用回退（与队列微调面板一致） */
 const FB_VIC_PRE = 1.5;
-const FB_VIC_POST = 1.0;
-const FB_KILL_PRE = 3.0;
+const FB_VIC_POST = 1.5;
+const FB_KILL_PRE = 1.5;
 const FB_KILL_POST = 1.5;
+
+/** 片段时间流示意图中间「主体段」参考秒数，与左右同为秒单位以便比例对齐 */
+const PACING_STRIP_CORE_REF_SEC = 6;
 
 function WorkflowSection({ title, subtitle, badge, defaultOpen = true, accentClass = "", children }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -108,8 +111,6 @@ export default function CommonParamsModal({
   recordInjectConsoleLines = "",
   onRecordInjectConsoleLinesChange,
   onPersistCs2RecordExtras,
-  specPlayerVerify,
-  patchSpecPlayerVerify,
 }) {
   const isPage = variant === "page";
   const globalPacing = useRecordingQueue((s) => s.globalPacing);
@@ -202,9 +203,9 @@ export default function CommonParamsModal({
     ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden"
     : "flex max-h-[min(94vh,900px)] w-full max-w-5xl flex-col overflow-hidden rounded-xl border border-cs2-border bg-cs2-bg-card shadow-2xl";
 
-  const preFlex = Math.max(pre, 0.35);
-  const postFlex = Math.max(post, 0.35);
-  const midFlex = 1.6;
+  const preFlex = Math.max(pre, 0.05);
+  const postFlex = Math.max(post, 0.05);
+  const midFlex = PACING_STRIP_CORE_REF_SEC;
 
   const body = (
     <>
@@ -244,7 +245,7 @@ export default function CommonParamsModal({
           {/* A1 时间与多段节奏 */}
           <WorkflowSection
             title="时间与多段节奏"
-            subtitle="成片击杀前/击杀后预留、多段衔接阈值与全局节奏重置；决定导出片的时间结构。"
+            subtitle="成片击杀段前/击杀段后预留、跳剪间隔阈值与全局节奏重置；决定导出片的时间结构。"
             defaultOpen
           >
             <div className="mb-5 overflow-hidden rounded-lg border border-cs2-border bg-cs2-surface-1 p-4">
@@ -257,7 +258,7 @@ export default function CommonParamsModal({
                   className="flex min-w-0 flex-col justify-center border-r border-black/30 bg-gradient-to-br from-cs2-accent/35 to-cs2-accent/10 px-2 py-1.5"
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wide text-cs2-text-primary/90">
-                    击杀前预留
+                    击杀段前预留
                   </span>
                   <span className="font-mono text-xs text-cs2-text-primary">{pre}s</span>
                 </div>
@@ -277,19 +278,19 @@ export default function CommonParamsModal({
                   className="flex min-w-0 flex-col justify-center bg-gradient-to-bl from-cyan-500/25 to-cyan-500/5 px-2 py-1.5"
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wide text-cs2-text-primary/90">
-                    击杀后预留
+                    击杀段后预留
                   </span>
                   <span className="font-mono text-xs text-cs2-text-primary">{post}s</span>
                 </div>
               </div>
-              <p className="text-xs leading-relaxed text-cs2-text-muted">
-                左段为击杀前预留、右段为击杀后预留；中间为解析得到的高光主体（时长由片段本身决定）。左右数值即每段击杀前回拨与每次击杀后收束的松紧；智能跳剪各段一致。
+              <p className="text-[10px] leading-relaxed text-cs2-text-muted">
+                左段为击杀段前预留、右段为击杀段后预留；中间为解析得到的高光主体（时长由片段本身决定）。左值为每段首杀前回拨，右值为每段末杀后收束（非每个击杀各加一段尾垫）；智能跳剪各段一致。
               </p>
             </div>
 
             <div className="mb-4 grid gap-4 sm:grid-cols-2">
               <PacingSlider
-                label="击杀前预留 (秒)"
+                label="击杀段前预留 (秒)"
                 min={0}
                 max={20}
                 step={0.1}
@@ -298,7 +299,7 @@ export default function CommonParamsModal({
                 onCommit={(n) => commitPacingNumbers({ pre_first_sec: n })}
               />
               <PacingSlider
-                label="击杀后预留 (秒)"
+                label="击杀段后预留 (秒)"
                 min={0}
                 max={10}
                 step={0.1}
@@ -310,7 +311,7 @@ export default function CommonParamsModal({
 
             <div className="rounded-lg border border-amber-500/15 bg-cs2-amber-surface px-3 py-3">
               <PacingSlider
-                label="防跳剪阈值 (秒) — 相邻片段间隔小于该值时合并为一段成片"
+                label="跳剪间隔阈值 (秒) — 相邻击杀间隔小于该值时合并为同一段成片"
                 min={2}
                 max={70}
                 step={0.5}
@@ -332,60 +333,6 @@ export default function CommonParamsModal({
             >
               恢复数值类节奏为后端内置默认（保留入队默认视角与 POV 时序默认值）
             </button>
-          </WorkflowSection>
-
-          <WorkflowSection
-            title="观战槽位 GSI 校验"
-            subtitle="注入 spec_player 后用 GSI 核对当前观战是否为目标 Steam；校验阶段的 demo 倍率过小可避免准备耗时吃掉「击杀后预留」时间轴。"
-            defaultOpen={false}
-            accentClass="ring-1 ring-emerald-500/10"
-          >
-            <div className="mb-3 text-[11px] leading-relaxed text-cs2-text-muted">
-              写入 <span className="font-mono text-cs2-text-secondary">spec_player_verify</span>{" "}
-              配置块；与全局节奏、POV 时序同级持久化。
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <PacingSlider
-                label="校验期 demo_timescale（越小越不推进时间轴，默认 0.05）"
-                min={0.01}
-                max={0.5}
-                step={0.01}
-                value={specPlayerVerify.demo_timescale}
-                disabled={batchRecording}
-                onCommit={(n) => patchSpecPlayerVerify({ demo_timescale: n })}
-                accentClass="accent-emerald-500"
-              />
-              <PacingSlider
-                label="单次重试最长等待 GSI（秒）"
-                min={0.1}
-                max={3}
-                step={0.05}
-                value={specPlayerVerify.per_retry_timeout_sec}
-                disabled={batchRecording}
-                onCommit={(n) => patchSpecPlayerVerify({ per_retry_timeout_sec: n })}
-                accentClass="accent-emerald-500"
-              />
-              <PacingSlider
-                label="每次 spec 注入后等待（秒）"
-                min={0}
-                max={0.5}
-                step={0.02}
-                value={specPlayerVerify.settle_sec}
-                disabled={batchRecording}
-                onCommit={(n) => patchSpecPlayerVerify({ settle_sec: n })}
-                accentClass="accent-emerald-500"
-              />
-              <PacingSlider
-                label="最多重试次数（依次 spec_player+1）"
-                min={1}
-                max={16}
-                step={1}
-                value={specPlayerVerify.max_retries}
-                disabled={batchRecording}
-                onCommit={(n) => patchSpecPlayerVerify({ max_retries: Math.round(n) })}
-                accentClass="accent-emerald-500"
-              />
-            </div>
           </WorkflowSection>
 
           {/* A2 镜头与 POV */}
@@ -420,10 +367,10 @@ export default function CommonParamsModal({
                 ) : null}
                 <div className="mt-3 grid gap-3">
                   <PacingSlider
-                    label="击杀前预留 (秒)"
-                    min={0.5}
+                    label="回看前停留 (秒)"
+                    min={0}
                     max={5}
-                    step={0.5}
+                    step={0.1}
                     value={victimPovPre}
                     disabled={batchRecording}
                     onCommit={(n) => commitPacingNumbers({ victim_pov_pre_sec: n })}
@@ -433,7 +380,7 @@ export default function CommonParamsModal({
                     label="死亡后停留 (秒)"
                     min={0}
                     max={5}
-                    step={0.5}
+                    step={0.1}
                     value={victimPovPost}
                     disabled={batchRecording}
                     onCommit={(n) => commitPacingNumbers({ victim_pov_post_sec: n })}
@@ -466,10 +413,10 @@ export default function CommonParamsModal({
                 ) : null}
                 <div className="mt-3 grid gap-3">
                   <PacingSlider
-                    label="击杀前预留 (秒)"
-                    min={0.5}
+                    label="回看前停留 (秒)"
+                    min={0}
                     max={5}
-                    step={0.5}
+                    step={0.1}
                     value={killerPovPre}
                     disabled={batchRecording}
                     onCommit={(n) => commitPacingNumbers({ killer_pov_pre_sec: n })}
@@ -479,7 +426,7 @@ export default function CommonParamsModal({
                     label="死亡后停留 (秒)"
                     min={0}
                     max={5}
-                    step={0.5}
+                    step={0.1}
                     value={killerPovPost}
                     disabled={batchRecording}
                     onCommit={(n) => commitPacingNumbers({ killer_pov_post_sec: n })}

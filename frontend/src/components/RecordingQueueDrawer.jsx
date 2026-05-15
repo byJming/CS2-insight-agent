@@ -128,7 +128,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
         </p>
         <div className="space-y-3">
           <PacingSliderRow
-            label="击杀前预留 (秒)"
+            label="击杀段前预留 (秒)"
             value={pre}
             min={0}
             max={20}
@@ -136,7 +136,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
             onChange={(n) => commit({ pre_first_sec: n })}
           />
           <PacingSliderRow
-            label="击杀后预留 (秒)"
+            label="击杀段后预留 (秒)"
             value={post}
             min={0}
             max={10}
@@ -144,7 +144,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
             onChange={(n) => commit({ post_last_sec: n })}
           />
           <PacingSliderRow
-            label="防跳剪阈值 (秒)"
+            label="跳剪间隔阈值 (秒)"
             value={gap}
             min={2}
             max={70}
@@ -210,10 +210,8 @@ export function PovSection({ item, updateItemPacing }) {
 
   const povEnabled = Boolean(po.victim_pov);
   const killerPovEnabled = Boolean(po.killer_pov);
-  const vicPre =
-    po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? (isFail ? 3.0 : 1.5);
-  const vicPost =
-    po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? (isFail ? 1.5 : 1.0);
+  const vicPre = po.victim_pov_pre_sec ?? gNum("victim_pov_pre_sec") ?? 1.5;
+  const vicPost = po.victim_pov_post_sec ?? gNum("victim_pov_post_sec") ?? 1.5;
   const killPre = po.killer_pov_pre_sec ?? gNum("killer_pov_pre_sec") ?? vicPre;
   const killPost = po.killer_pov_post_sec ?? gNum("killer_pov_post_sec") ?? vicPost;
 
@@ -288,11 +286,11 @@ export function PovSection({ item, updateItemPacing }) {
       {povEnabled && canVictimPov && (
         <div className="space-y-2 rounded border border-cyan-500/10 bg-cs2-cyan-surface p-2">
           <PacingSliderRow
-            label="击杀前预留 (秒) · 受害者视角"
+            label="回看前停留 (秒) · 受害者视角"
             value={vicPre}
-            min={0.5}
+            min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-cyan-500"
             valueTextClass="text-cyan-300"
             onChange={(n) => commit({ victim_pov_pre_sec: n })}
@@ -302,7 +300,7 @@ export function PovSection({ item, updateItemPacing }) {
             value={vicPost}
             min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-cyan-500"
             valueTextClass="text-cyan-300"
             onChange={(n) => commit({ victim_pov_post_sec: n })}
@@ -313,11 +311,11 @@ export function PovSection({ item, updateItemPacing }) {
       {killerPovEnabled && canKillerPov && (
         <div className="space-y-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface p-2">
           <PacingSliderRow
-            label="击杀前预留 (秒) · 击杀者视角"
+            label="回看前停留 (秒) · 击杀者视角"
             value={killPre}
-            min={0.5}
+            min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-amber-500"
             valueTextClass="text-cs2-amber-on-surface"
             onChange={(n) => commit({ killer_pov_pre_sec: n })}
@@ -327,7 +325,7 @@ export function PovSection({ item, updateItemPacing }) {
             value={killPost}
             min={0}
             max={5}
-            step={0.5}
+            step={0.1}
             accent="accent-amber-500"
             valueTextClass="text-cs2-amber-on-surface"
             onChange={(n) => commit({ killer_pov_post_sec: n })}
@@ -433,7 +431,7 @@ export function GlobalPacingPanel({
 
       <div className="space-y-3 rounded border border-cs2-border bg-cs2-bg-input/50 p-2">
         <PacingSliderRow
-          label="击杀前预留 (秒)"
+          label="击杀段前预留 (秒)"
           value={pre}
           min={0}
           max={20}
@@ -441,7 +439,7 @@ export function GlobalPacingPanel({
           onChange={(n) => commit({ pre_first_sec: n })}
         />
         <PacingSliderRow
-          label="击杀后预留 (秒)"
+          label="击杀段后预留 (秒)"
           value={post}
           min={0}
           max={10}
@@ -449,7 +447,7 @@ export function GlobalPacingPanel({
           onChange={(n) => commit({ post_last_sec: n })}
         />
         <PacingSliderRow
-          label="防跳剪阈值 (秒)"
+          label="跳剪间隔阈值 (秒)"
           value={gap}
           min={2}
           max={70}
@@ -669,8 +667,8 @@ function QueueItemCard({
         isClipPacingAndPovLocked(cd) ? (
           <p className="mt-2 rounded border border-cs2-amber-surface bg-cs2-amber-surface px-2 py-1.5 text-[10px] text-cs2-amber-on-surface">
             {isRoundTimelineRoundClip(cd)
-              ? "整回合时间线为固定 tick 窗口，单条剪辑节奏与全局击杀前/击杀后预留不生效。"
-              : "回合死亡合集为固定分段合辑，单条剪辑节奏与全局击杀前/击杀后预留不生效。"}
+              ? "整回合时间线为固定 tick 窗口，单条剪辑节奏与全局击杀段前/击杀段后预留不生效。"
+              : "回合死亡合集为固定分段合辑，单条剪辑节奏与全局击杀段前/击杀段后预留不生效。"}
           </p>
         ) : (
           <div className="mt-2">
