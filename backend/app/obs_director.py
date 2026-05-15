@@ -27,6 +27,7 @@ from obswebsocket.core import RecvThread, ReconnectThread
 from .demo_parse_isolation import IsolatedParseError, get_demo_match_summary_isolated
 from .demo_parser import (
     BUFFER_SECONDS_AFTER,
+    BUFFER_SECONDS_BEFORE,
     TICK_RATE as DEMO_TICK_RATE,
     compute_spec_player_slot_one_based,
     get_demo_spec_calibration_tick,
@@ -488,6 +489,340 @@ def _clip_death_tick(clip: dict) -> Optional[int]:
     return tick if tick >= 0 else None
 
 
+def _as_int_tick(value: Any) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        t = int(value)
+    except (TypeError, ValueError):
+        return None
+    return t if t >= 0 else None
+
+
+def _extract_kill_ticks_for_segment(clip: dict) -> list[int]:
+    """高光 / 时间线击杀 / 合集等：收集可用于锚定录制窗的击杀 tick（升序去重）。"""
+    ticks: set[int] = set(_clip_kill_ticks_sorted(clip))
+
+    raw_kills = clip.get("kills")
+    if isinstance(raw_kills, list):
+        for kill in raw_kills:
+            if isinstance(kill, dict):
+                tick = _as_int_tick(
+                    kill.get("tick")
+                    or kill.get("event_tick")
+                    or kill.get("kill_tick")
+                    or kill.get("demo_tick")
+                )
+                if tick is not None:
+                    ticks.add(tick)
+
+    raw_events = clip.get("events")
+    if isinstance(raw_events, list):
+        for event in raw_events:
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("type") or event.get("event_type") or "").lower()
+            if "kill" not in event_type:
+                continue
+            tick = _as_int_tick(
+                event.get("tick")
+                or event.get("event_tick")
+                or event.get("kill_tick")
+                or event.get("demo_tick")
+            )
+            if tick is not None:
+                ticks.add(tick)
+
+    return sorted(ticks)
+
+
+def _extract_death_tick_for_segment(clip: dict) -> Optional[int]:
+    for key in ("death_tick", "died_tick", "victim_death_tick"):
+        tick = _as_int_tick(clip.get(key))
+        if tick is not None:
+            return tick
+
+    raw_events = clip.get("events")
+    if isinstance(raw_events, list):
+        for event in raw_events:
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("type") or event.get("event_type") or "").lower()
+            if "death" not in event_type:
+                continue
+            tick = _as_int_tick(
+                event.get("tick")
+                or event.get("event_tick")
+                or event.get("death_tick")
+                or event.get("demo_tick")
+            )
+            if tick is not None:
+                return tick
+
+    return None
+
+
+def _has_event_anchor_ticks(clip: dict) -> bool:
+    return bool(_extract_kill_ticks_for_segment(clip)) or _extract_death_tick_for_segment(clip) is not None
+
+
+def _is_timeline_event_clip(clip: dict) -> bool:
+    """时间线相关片段（含整回合时间线）；用于 burn 等宽判。"""
+    value_candidates = [
+        clip.get("timeline_source"),
+        clip.get("source"),
+        clip.get("clip_type"),
+        clip.get("type"),
+        clip.get("category"),
+    ]
+    joined = " ".join(str(v or "").lower() for v in value_candidates)
+    return "timeline" in joined or "round_timeline" in joined
+
+
+def _is_round_timeline_event_clip(clip: dict) -> bool:
+    """时间轴上单事件入队（非整回合固定窗）；前后预留 / trim 等按此收紧。"""
+    return str(clip.get("timeline_source") or "").strip() == "round_timeline_event"
+
+
+def _build_pov_pairs_for_clip(
+    clip: dict,
+    *,
+    want_victim_pov: bool,
+    want_killer_pov: bool,
+    spectator_name: Optional[str],
+) -> list[dict[str, Any]]:
+    """从 clip 生成 POV 锚点；next_kill_tick 仅用于 POV 段 clamp，不影响主段 segment。"""
+    pairs: list[dict[str, Any]] = []
+
+    kill_ticks = _extract_kill_ticks_for_segment(clip)
+    victims = clip.get("victims") or []
+    if not isinstance(victims, list):
+        victims = []
+
+    if want_victim_pov and kill_ticks and victims and str(clip.get("category") or "").strip() != "fail":
+        for index, victim_name in enumerate(victims):
+            vn = str(victim_name or "").strip()
+            if not vn:
+                continue
+            tick_index = min(index, len(kill_ticks) - 1)
+            event_tick = int(kill_ticks[tick_index])
+            next_kill_tick: Optional[int] = None
+            if tick_index + 1 < len(kill_ticks):
+                next_kill_tick = int(kill_ticks[tick_index + 1])
+            pairs.append(
+                {
+                    "player_name": vn,
+                    "tick": event_tick,
+                    "kind": "victim",
+                    "next_kill_tick": next_kill_tick,
+                }
+            )
+
+    death_tick = _extract_death_tick_for_segment(clip)
+    killer_name = str(clip.get("killer_name") or "").strip()
+
+    if (
+        want_killer_pov
+        and death_tick is not None
+        and killer_name
+        and str(clip.get("category") or "").strip() == "fail"
+    ):
+        pairs.append(
+            {
+                "player_name": killer_name,
+                "tick": int(death_tick),
+                "kind": "killer",
+                "next_kill_tick": None,
+            }
+        )
+
+    if want_killer_pov and kill_ticks and str(clip.get("category") or "").strip() != "fail":
+        killer_list = clip.get("killers") or []
+        if not killer_list:
+            _fb = (
+                str(clip.get("_spec_name") or "").strip()
+                or str(clip.get("target_player") or "").strip()
+                or str(spectator_name or "").strip()
+            )
+            killer_list = [_fb] * len(kill_ticks) if _fb else []
+        for _kn, _kt in zip(killer_list, kill_ticks):
+            kn = str(_kn or "").strip()
+            if not kn:
+                continue
+            pairs.append(
+                {
+                    "player_name": kn,
+                    "tick": int(_kt),
+                    "kind": "killer",
+                    "next_kill_tick": None,
+                }
+            )
+
+    return pairs
+
+
+def _cluster_ticks_by_gap(ticks: list[int], max_gap_ticks: int) -> list[list[int]]:
+    gap = max(0, int(max_gap_ticks))
+    clean_ticks = sorted({int(t) for t in ticks if _as_int_tick(t) is not None})
+    if not clean_ticks:
+        return []
+
+    clusters: list[list[int]] = []
+    for tick in clean_ticks:
+        if not clusters:
+            clusters.append([tick])
+            continue
+        if tick - clusters[-1][-1] <= gap:
+            clusters[-1].append(tick)
+        else:
+            clusters.append([tick])
+
+    return clusters
+
+
+def _build_event_anchor_segments(
+    *,
+    clip: dict,
+    pre_ticks: int,
+    post_ticks: int,
+    max_gap_ticks: int,
+    clip_min_start_tick: int,
+    clip_max_end_tick: int,
+    kill_ticks_override: Optional[list[int]] = None,
+) -> list[tuple[int, int]]:
+    """用户显式 pacing 下：多杀先按 max_gap 聚类，再逐簇套 pre/post；死亡单段。"""
+    if kill_ticks_override:
+        kill_ticks = sorted({int(t) for t in kill_ticks_override if _as_int_tick(t) is not None})
+    else:
+        kill_ticks = _extract_kill_ticks_for_segment(clip)
+
+    out: list[tuple[int, int]] = []
+
+    if kill_ticks:
+        clusters = _cluster_ticks_by_gap(kill_ticks, max_gap_ticks)
+        for ci, cluster in enumerate(clusters):
+            start_tick = max(0, int(cluster[0]) - int(pre_ticks))
+            if ci == 0 and clip_min_start_tick > 0:
+                start_tick = max(start_tick, int(clip_min_start_tick))
+            end_tick = int(cluster[-1]) + int(post_ticks)
+            if clip_max_end_tick > 0:
+                end_tick = min(end_tick, int(clip_max_end_tick))
+            if end_tick > start_tick:
+                out.append((start_tick, end_tick))
+        return out
+
+    death_tick = _extract_death_tick_for_segment(clip)
+    if death_tick is None:
+        return []
+
+    start_tick = max(0, int(death_tick) - int(pre_ticks))
+    if clip_min_start_tick > 0:
+        start_tick = max(start_tick, int(clip_min_start_tick))
+    end_tick = int(death_tick) + int(post_ticks)
+    if clip_max_end_tick > 0:
+        end_tick = min(end_tick, int(clip_max_end_tick))
+    if end_tick > start_tick:
+        out.append((start_tick, end_tick))
+    return out
+
+
+def _log_segment_pacing_debug_clusters(
+    clip: dict,
+    segments: list[tuple[int, int]],
+    tick_rate: int,
+    *,
+    pre_sec: float,
+    post_sec: float,
+    max_gap_ticks: int,
+) -> None:
+    kill_ticks = _extract_kill_ticks_for_segment(clip)
+    death_tick = _extract_death_tick_for_segment(clip)
+    clip_id = clip.get("clip_id") or clip.get("id")
+
+    if kill_ticks:
+        clusters = _cluster_ticks_by_gap(kill_ticks, max_gap_ticks)
+        if clusters and len(clusters) == len(segments):
+            for index, cluster in enumerate(clusters):
+                seg_start, seg_end = segments[index]
+                actual_pre = (cluster[0] - seg_start) / float(tick_rate)
+                actual_post = (seg_end - cluster[-1]) / float(tick_rate)
+                logger.info(
+                    "[segment-debug-pacing] clip_id=%s segment=%s expected_pre=%s expected_post=%s "
+                    "actual_pre=%.3f actual_post=%.3f cluster=%s segment_ticks=%s",
+                    clip_id,
+                    index,
+                    pre_sec,
+                    post_sec,
+                    actual_pre,
+                    actual_post,
+                    cluster,
+                    (seg_start, seg_end),
+                )
+            return
+
+    if death_tick is not None and segments:
+        seg_start, seg_end = segments[0]
+        actual_pre = (int(death_tick) - seg_start) / float(tick_rate)
+        actual_post = (seg_end - int(death_tick)) / float(tick_rate)
+        logger.info(
+            "[segment-debug-pacing] clip_id=%s death expected_pre=%s expected_post=%s "
+            "actual_pre=%.3f actual_post=%.3f death_tick=%s segment_ticks=%s",
+            clip_id,
+            pre_sec,
+            post_sec,
+            actual_pre,
+            actual_post,
+            death_tick,
+            (seg_start, seg_end),
+        )
+
+
+def _log_smart_jump_segment_debug(
+    clip: dict,
+    segments: list[tuple[int, int]],
+    override: dict,
+    *,
+    pre_sec: float,
+    post_sec: float,
+    max_gap_sec: float,
+    tick_rate: int,
+    has_user_pacing: bool,
+    max_gap_ticks: int,
+) -> None:
+    kill_ticks = _extract_kill_ticks_for_segment(clip)
+    death_tick = _extract_death_tick_for_segment(clip)
+    clip_id = clip.get("clip_id") or clip.get("id")
+    logger.info(
+        "[segment-debug] clip_id=%s category=%s type=%s timeline_source=%s "
+        "has_user_pacing=%s pre_sec=%s post_sec=%s max_gap_sec=%s "
+        "kill_ticks=%s death_tick=%s clip_start=%s clip_end=%s "
+        "source_ticks=%s final_segments=%s",
+        clip_id,
+        clip.get("category"),
+        clip.get("type") or clip.get("clip_type"),
+        clip.get("timeline_source"),
+        has_user_pacing,
+        pre_sec,
+        post_sec,
+        max_gap_sec,
+        kill_ticks,
+        death_tick,
+        clip.get("start_tick"),
+        clip.get("end_tick"),
+        clip.get("source_ticks"),
+        segments,
+    )
+    if segments:
+        _log_segment_pacing_debug_clusters(
+            clip,
+            segments,
+            tick_rate,
+            pre_sec=pre_sec,
+            post_sec=post_sec,
+            max_gap_ticks=max_gap_ticks,
+        )
+
+
 def _pacing_pre_first_sec_effective(clip: dict) -> float:
     """与 ``build_smart_jump_segments`` 内 ``pre_first_sec`` 解析一致（秒）。
 
@@ -505,12 +840,417 @@ def _pacing_pre_first_sec_effective(clip: dict) -> float:
     return max(0.0, float(ticks)) / float(DEMO_TICK_RATE)
 
 
+def _pacing_post_last_sec_effective(clip: dict) -> float:
+    """与 ``build_smart_jump_segments`` 内 ``post_last_sec`` 解析一致（秒）。"""
+    raw = clip.get("pacing_override")
+    if isinstance(raw, dict):
+        v = raw.get("post_last_sec")
+        if v is not None and str(v).strip():
+            try:
+                return max(0.0, float(v))
+            except (TypeError, ValueError):
+                pass
+    ticks = _env_int("CS2_INSIGHT_SMART_POST_LAST_TICKS", int(float(DEMO_TICK_RATE) * 1.5))
+    return max(0.0, float(ticks)) / float(DEMO_TICK_RATE)
+
+
+def _extract_kill_tick_and_round(item: Any) -> tuple[Optional[int], Any]:
+    """从多种 kill 条目结构中解析 (tick, round)；tick 无效时返回 (None, None)。"""
+    try:
+        if isinstance(item, dict):
+            tick = (
+                item.get("kill_tick")
+                or item.get("tick")
+                or item.get("event_tick")
+                or item.get("demo_tick")
+            )
+            round_no = (
+                item.get("round_number")
+                or item.get("round")
+                or item.get("round_num")
+            )
+            if tick is None:
+                return None, None
+            return int(tick), round_no
+
+        if isinstance(item, (list, tuple)):
+            if not item:
+                return None, None
+            tick = int(item[0])
+            round_no = item[1] if len(item) > 1 else None
+            return tick, round_no
+
+        return int(item), None
+    except (TypeError, ValueError):
+        return None, None
+
+
+def _build_all_kills_windows(
+    kill_items: list[Any],
+    pre_first_sec: float,
+    post_last_sec: float,
+    demo_tick_rate: int,
+    merge_gap_ticks: Optional[int] = None,
+    max_gap_ticks: Optional[int] = None,
+) -> list[tuple[int, int]]:
+    """all_kills：每杀 [kill-pre, kill+post]；合并条件（同回合）：
+
+    1) 窗口重叠或间隔 ≤ merge_gap_ticks（防抖）；
+    2) 或相邻击杀 tick 差 ≤ max_gap_ticks（尊重 pacing 的 max_gap_sec / 智能跳剪阈值）。
+    """
+    pre_ticks = max(0, int(float(pre_first_sec or 0) * demo_tick_rate))
+    post_ticks = max(0, int(float(post_last_sec or 0) * demo_tick_rate))
+
+    if merge_gap_ticks is None:
+        try:
+            merge_gap_sec = float(os.getenv("CS2_INSIGHT_ALL_KILLS_WINDOW_MERGE_GAP_SEC", "0.15"))
+        except (TypeError, ValueError):
+            merge_gap_sec = 0.15
+        merge_gap_ticks = max(0, int(merge_gap_sec * demo_tick_rate))
+
+    windows: list[dict[str, Any]] = []
+
+    for item in kill_items or []:
+        kill_tick, round_no = _extract_kill_tick_and_round(item)
+        if kill_tick is None:
+            continue
+
+        start_tick = max(0, kill_tick - pre_ticks)
+        end_tick = max(start_tick + 1, kill_tick + post_ticks)
+
+        windows.append(
+            {
+                "round_number": round_no,
+                "kill_tick": kill_tick,
+                "start_tick": start_tick,
+                "end_tick": end_tick,
+            }
+        )
+
+    def _sort_key(w: dict[str, Any]) -> tuple[int, int]:
+        rn = w.get("round_number")
+        try:
+            rn_key = int(rn) if rn is not None else -1
+        except (TypeError, ValueError):
+            rn_key = -1
+        return (rn_key, int(w["kill_tick"]))
+
+    windows.sort(key=_sort_key)
+
+    merged: list[dict[str, Any]] = []
+
+    for w in windows:
+        if not merged:
+            w.setdefault("last_kill_tick", int(w["kill_tick"]))
+            merged.append(w)
+            continue
+
+        cur = merged[-1]
+
+        cur_round = cur.get("round_number")
+        next_round = w.get("round_number")
+
+        if cur_round is not None and next_round is not None:
+            same_round = str(cur_round) == str(next_round)
+        else:
+            same_round = True
+
+        overlap_merge = int(w["start_tick"]) <= int(cur["end_tick"]) + merge_gap_ticks
+        gap_merge = False
+        if max_gap_ticks is not None and int(max_gap_ticks) > 0:
+            try:
+                cur_last = int(cur.get("last_kill_tick", cur["kill_tick"]))
+                gap_merge = (int(w["kill_tick"]) - cur_last) <= int(max_gap_ticks)
+            except (TypeError, ValueError):
+                gap_merge = False
+
+        should_merge = same_round and (overlap_merge or gap_merge)
+
+        if should_merge:
+            cur["end_tick"] = max(int(cur["end_tick"]), int(w["end_tick"]))
+            cur["last_kill_tick"] = int(w["kill_tick"])
+        else:
+            w.setdefault("last_kill_tick", int(w["kill_tick"]))
+            merged.append(w)
+
+    out: list[tuple[int, int]] = []
+    for w in merged:
+        s, e = int(w["start_tick"]), int(w["end_tick"])
+        if e > s:
+            out.append((s, e))
+    return out
+
+
+def _is_freeze_to_death_clip(clip: dict) -> bool:
+    """回合冻结→死亡合集：录制窗已由 ``source_ticks`` 完整表达，导播应原样分段。"""
+    kind = str(
+        clip.get("compilation_kind")
+        or clip.get("source_kind")
+        or clip.get("type")
+        or clip.get("clip_type")
+        or ""
+    ).strip().lower()
+    if kind in {"freeze_to_death", "freeze-to-death", "round_freeze_to_death"}:
+        return True
+    if clip.get("freeze_to_death_round_windows"):
+        return True
+    return False
+
+
+def _is_death_compilation(clip: dict) -> bool:
+    """死亡合集：主段必须以 death_tick（及同类锚点）为准，不能信任解析器 baked 的 source_ticks 窗。"""
+    kind = str(clip.get("compilation_kind") or "").strip().lower()
+    category = str(clip.get("category") or "").strip().lower()
+    recording_perspective = str(clip.get("recording_perspective") or "").strip().lower()
+
+    if category != "compilation":
+        return False
+
+    # freeze_to_death：``build_smart_jump_segments`` 最前即按 ``source_ticks`` 早退，不走死亡点窗重写。
+    death_like_kinds = {
+        "all_deaths",
+        "deaths",
+        "death_compilation",
+        "player_deaths",
+        "victim_deaths",
+        "nemesis_deaths",
+    }
+
+    if kind in death_like_kinds:
+        return True
+
+    if clip.get("death_tick") is not None and not _clip_kill_ticks_in_order(clip):
+        return True
+
+    if recording_perspective in {"victim", "victim_pov", "death", "death_pov"} and clip.get("death_tick") is not None:
+        return True
+
+    return False
+
+
+def _build_death_compilation_windows(
+    clip: dict,
+    source_records: list[tuple[int, int, int, int]],
+    *,
+    pre_ticks: int,
+    post_ticks: int,
+    clip_min_start_tick: int,
+    clip_max_tick: int,
+) -> list[tuple[int, int]]:
+    """以死亡 tick 为锚生成主段；同回合仅允许极小间隙合并，不按 max_gap 合并。"""
+    kill_order = _clip_kill_ticks_in_order(clip)
+    events: list[tuple[int, int]] = []
+
+    if kill_order and len(kill_order) == len(source_records):
+        for kt, (_ss, _ee, _kt2, rn) in zip(kill_order, source_records):
+            try:
+                t = int(kt)
+            except (TypeError, ValueError):
+                continue
+            if t < 0:
+                continue
+            try:
+                rni = int(rn)
+            except (TypeError, ValueError):
+                rni = 0
+            events.append((t, rni))
+    else:
+        raw_death_ticks = clip.get("death_ticks")
+        source_rounds = clip.get("source_rounds") or []
+        if isinstance(raw_death_ticks, list):
+            for i, x in enumerate(raw_death_ticks):
+                try:
+                    t = int(x)
+                except (TypeError, ValueError):
+                    continue
+                if t < 0:
+                    continue
+                try:
+                    rni = int(source_rounds[i]) if i < len(source_rounds) else 0
+                except (TypeError, ValueError):
+                    rni = 0
+                events.append((t, rni))
+
+        dt = _clip_death_tick(clip)
+        if dt is not None and not events:
+            rn_guess = 0
+            for ss, ee, kt, rn in source_records:
+                try:
+                    iss, iee, ikt, irn = int(ss), int(ee), int(kt), int(rn)
+                except (TypeError, ValueError):
+                    continue
+                if ikt == int(dt) or (iss <= int(dt) <= iee):
+                    rn_guess = irn
+                    break
+            events.append((int(dt), rn_guess))
+
+        if not events:
+            for ss, ee, kt, rn in source_records:
+                try:
+                    iss, t, rni = int(ss), int(kt), int(rn)
+                except (TypeError, ValueError):
+                    continue
+                if t < 0 or t == iss:
+                    continue
+                events.append((t, rni))
+
+    by_tick: dict[int, int] = {}
+    for t, rn in events:
+        if t not in by_tick:
+            by_tick[t] = rn
+    if not by_tick:
+        return []
+
+    ordered = sorted(by_tick.items(), key=lambda it: (it[1], it[0]))
+
+    merge_gap_ticks = _env_int(
+        "CS2_INSIGHT_DEATH_WINDOW_MERGE_GAP_TICKS",
+        int(float(DEMO_TICK_RATE) * 0.15),
+    )
+
+    windows: list[tuple[int, int, int]] = []
+    for t, rn in ordered:
+        s = max(0, t - pre_ticks)
+        if clip_min_start_tick > 0:
+            s = max(s, clip_min_start_tick)
+
+        e = t + post_ticks
+        if clip_max_tick > 0:
+            e = min(e, clip_max_tick)
+
+        if e <= s:
+            e = s + 1
+
+        windows.append((s, e, rn))
+
+    merged: list[tuple[int, int, int]] = []
+    for s, e, rn in windows:
+        if not merged:
+            merged.append((s, e, rn))
+            continue
+
+        ps, pe, prn = merged[-1]
+        if rn == prn and s <= pe + merge_gap_ticks:
+            merged[-1] = (ps, max(pe, e), prn)
+        else:
+            merged.append((s, e, rn))
+
+    return [(s, e) for s, e, rn in merged]
+
+
 def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
+    """智能跳剪 / 单段墙钟所依据的 ``[(seg_start, seg_end), ...]``。
+
+    **入口统一在本函数**，但按 clip 形态分 **三套算法**（先匹配者先返回），与「是否都叫 pacing_override」无关：
+
+    1. **合集 + ``source_ticks``**（``category == compilation`` 且 ``source_ticks`` 非空）
+       - **``freeze_to_death``**：仅信任前端/解析器写入的 ``source_ticks``，不因 ``kill_ticks`` /
+         ``death_tick`` / pacing 重算窗（见 ``_is_freeze_to_death_clip`` 早退）。
+       - **死亡类合集**（``_is_death_compilation``）：``_build_death_compilation_windows``，
+         按死亡点 + 回合合并窗；pre/post 读 ``pacing_override`` / ``CS2_INSIGHT_SMART_*``。
+       - **``compilation_kind == all_kills``**：``_build_all_kills_windows``，
+         每杀 ``[kill−pre, kill+post]`` 再按重叠与 ``max_gap`` 合并；**不是**高光那种「锚点 tick 聚类」。
+       - **其它合集**：直接用 ``source_ticks`` 的 ``(ss, ee)``，不在此函数里按 pre/post 重算窗。
+
+    2. **无 ``kill_ticks``**（纯死亡锚点、时间线死亡等）：单段 ``death_tick ± pre/post``，
+       其中 ``round_timeline_event`` 且未写 ``post_last_sec`` 时死后留白默认走
+       ``CS2_INSIGHT_TIMELINE_DEATH_POST_TICKS``（默认 2s）。
+
+    3. **高光 / 时间线击杀 / 多杀非合集**（默认）：``kill_ticks`` 按 ``MAX_GAP`` 聚类，
+       每簇 ``首杀−PRE_FIRST`` … ``末杀+POST_LAST``，并可能按 ``clip.start/end_tick`` 扩窗。
+
+    若 ``pacing_override`` 显式包含 ``pre_first_sec`` / ``post_last_sec``，且存在击杀或死亡锚点 tick，
+    则先按 ``max_gap_sec`` 对击杀 tick 聚类，再对每簇 ``首杀−PRE_FIRST`` … ``末杀+POST_LAST`` 生成 segment；
+    死亡仍为单段。``round_timeline_event`` 且用户 pacing 时不再叠加 ``clip_min_guard`` 以免吃掉前预留。
+    不再用 ``clip.start_tick/end_tick`` 或 ``source_ticks`` 的解析器默认 buffer 回扩。
+
+    整回合 ``round_timeline_round`` 主段通常 ``fixed_segment_pacing``，不依赖本函数分段。
+    """
     start_tick = max(0, int(clip.get("start_tick") or 0))
     end_tick = max(start_tick, int(clip.get("end_tick") or 0))
 
+    override = clip.get("pacing_override") or {}
+    if not isinstance(override, dict):
+        override = {}
+    has_user_pacing = "pre_first_sec" in override or "post_last_sec" in override
+
+    def _get_override_ticks(key: str, default_env_key: str, default_sec: float) -> int:
+        val = override.get(key)
+        if val is not None and str(val).strip():
+            return max(0, int(float(val) * DEMO_TICK_RATE))
+        return _env_int(default_env_key, int(DEMO_TICK_RATE * default_sec))
+
+    PRE_FIRST = _get_override_ticks("pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 1.5)
+    POST_LAST = _get_override_ticks("post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 1.5)
+    MAX_GAP = max(1, _get_override_ticks("max_gap_sec", "CS2_INSIGHT_SMART_MAX_GAP_TICKS", 12.0))
+
+    clip_min_tick = max(0, int(clip.get("clip_min_tick") or 0))
+    clip_min_guard_ticks = _get_override_ticks(
+        "clip_min_guard_sec",
+        "CS2_INSIGHT_SMART_CLIP_MIN_GUARD_TICKS",
+        0.35,
+    )
+    clip_min_start_tick = clip_min_tick + clip_min_guard_ticks if clip_min_tick > 0 else 0
+    _cmt_raw = clip.get("clip_max_tick")
+    clip_max_tick = int(_cmt_raw) if _cmt_raw else 0
+
+    pre_first_sec_eff = PRE_FIRST / float(DEMO_TICK_RATE)
+    post_last_sec_eff = POST_LAST / float(DEMO_TICK_RATE)
+    max_gap_sec_eff = MAX_GAP / float(DEMO_TICK_RATE)
+    _max_gap_ticks_i = max(1, int(MAX_GAP))
+
     raw_source_ticks = clip.get("source_ticks") or []
     if str(clip.get("category") or "").strip() == "compilation" and raw_source_ticks:
+        if _is_freeze_to_death_clip(clip):
+            ftd_segments: list[tuple[int, int]] = []
+            for item in raw_source_ticks:
+                try:
+                    ss = int(item[0])
+                    ee = int(item[1])
+                except (TypeError, ValueError, IndexError):
+                    continue
+                ss = max(0, ss)
+                if ee <= ss:
+                    continue
+                ftd_segments.append((ss, ee))
+            ftd_segments.sort(key=lambda seg: seg[0])
+            if ftd_segments:
+                fixed_ftd: list[tuple[int, int]] = []
+                for i, (ss, ee) in enumerate(ftd_segments):
+                    s_i = max(0, int(ss))
+                    e_i = int(ee)
+                    if i + 1 < len(ftd_segments):
+                        next_s = int(ftd_segments[i + 1][0])
+                        e_i = min(e_i, next_s)
+                    if e_i > s_i:
+                        fixed_ftd.append((s_i, e_i))
+                ftd_segments = fixed_ftd
+                if ftd_segments:
+                    _cid = clip.get("clip_id") or clip.get("id")
+                    logger.info(
+                        "[freeze-to-death-segments] clip_id=%s source_rounds=%s source_round_ends=%s "
+                        "source_ticks=%s final_segments=%s kill_ticks=%s death_tick=%s",
+                        _cid,
+                        clip.get("source_rounds"),
+                        clip.get("source_round_ends"),
+                        raw_source_ticks,
+                        ftd_segments,
+                        clip.get("kill_ticks"),
+                        clip.get("death_tick"),
+                    )
+                    _log_smart_jump_segment_debug(
+                        clip,
+                        ftd_segments,
+                        override,
+                        pre_sec=float(pre_first_sec_eff),
+                        post_sec=float(post_last_sec_eff),
+                        max_gap_sec=float(max_gap_sec_eff),
+                        tick_rate=DEMO_TICK_RATE,
+                        has_user_pacing=has_user_pacing,
+                        max_gap_ticks=_max_gap_ticks_i,
+                    )
+                    return ftd_segments
+
         source_records: list[tuple[int, int, int, int]] = []
         kill_ticks_for_source = _clip_kill_ticks_in_order(clip)
         source_rounds = clip.get("source_rounds") or []
@@ -530,71 +1270,203 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
             source_records.append((ss, ee, kt, rn))
         source_records.sort(key=lambda rec: (rec[0], rec[2]))
         source_segments: list[tuple[int, int]] = []
-        if str(clip.get("compilation_kind") or "") == "all_kills" and source_records:
+        if _is_death_compilation(clip) and source_records:
             source_override = clip.get("pacing_override") or {}
-            # clip_min_start_tick / clip_max_tick are defined later in the function but needed
-            # here because the compilation path returns early before reaching those definitions.
+            if not isinstance(source_override, dict):
+                source_override = {}
+
+            def _death_comp_ov_ticks(key: str, default_env_key: str, default_sec: float) -> int:
+                raw = source_override.get(key)
+                if raw is not None and str(raw).strip():
+                    try:
+                        return max(0, int(float(raw) * DEMO_TICK_RATE))
+                    except (TypeError, ValueError):
+                        pass
+                return _env_int(default_env_key, int(float(DEMO_TICK_RATE) * float(default_sec)))
+
+            pre_ticks = _death_comp_ov_ticks(
+                "pre_first_sec",
+                "CS2_INSIGHT_SMART_PRE_FIRST_TICKS",
+                1.5,
+            )
+            post_ticks = _death_comp_ov_ticks(
+                "post_last_sec",
+                "CS2_INSIGHT_SMART_POST_LAST_TICKS",
+                1.5,
+            )
+
             _comp_min_tick = max(0, int(clip.get("clip_min_tick") or 0))
             _comp_min_start = (
                 _comp_min_tick + max(0, int(0.35 * DEMO_TICK_RATE)) if _comp_min_tick > 0 else 0
             )
             _comp_max_tick_raw = clip.get("clip_max_tick")
             _comp_max_tick = int(_comp_max_tick_raw) if _comp_max_tick_raw else 0
+
+            death_segments = _build_death_compilation_windows(
+                clip,
+                source_records,
+                pre_ticks=pre_ticks,
+                post_ticks=post_ticks,
+                clip_min_start_tick=_comp_min_start,
+                clip_max_tick=_comp_max_tick,
+            )
+
+            if death_segments:
+                logger.info(
+                    "[build_segments] death_compilation_window clip_id=%s death_tick=%s override=%s segments=%s",
+                    clip.get("clip_id"),
+                    clip.get("death_tick"),
+                    source_override,
+                    death_segments,
+                )
+                _log_smart_jump_segment_debug(
+                    clip,
+                    death_segments,
+                    source_override,
+                    pre_sec=pre_ticks / float(DEMO_TICK_RATE),
+                    post_sec=post_ticks / float(DEMO_TICK_RATE),
+                    max_gap_sec=max_gap_sec_eff,
+                    tick_rate=DEMO_TICK_RATE,
+                    has_user_pacing=has_user_pacing,
+                    max_gap_ticks=_max_gap_ticks_i,
+                )
+                return death_segments
+
+        if str(clip.get("compilation_kind") or "") == "all_kills" and source_records:
+            source_override = clip.get("pacing_override") or {}
+            if not isinstance(source_override, dict):
+                source_override = {}
+            # clip_min_start_tick / clip_max_tick：与下方通用路径一致，compilation 早退前需本地计算
+            _comp_min_tick = max(0, int(clip.get("clip_min_tick") or 0))
+            _comp_min_start = (
+                _comp_min_tick + max(0, int(0.35 * DEMO_TICK_RATE)) if _comp_min_tick > 0 else 0
+            )
+            _comp_max_tick_raw = clip.get("clip_max_tick")
+            _comp_max_tick = int(_comp_max_tick_raw) if _comp_max_tick_raw else 0
+
+            def _all_kills_ov_ticks(key: str, default_env_key: str, default_sec: float) -> int:
+                val = source_override.get(key)
+                if val is not None and str(val).strip():
+                    try:
+                        return max(0, int(float(val) * DEMO_TICK_RATE))
+                    except (TypeError, ValueError):
+                        pass
+                return _env_int(default_env_key, int(DEMO_TICK_RATE * default_sec))
+
+            pre_first_ticks = _all_kills_ov_ticks(
+                "pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 1.5
+            )
+            post_last_ticks = _all_kills_ov_ticks(
+                "post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 1.5
+            )
+            pre_first_sec = pre_first_ticks / float(DEMO_TICK_RATE)
+            post_last_sec = post_last_ticks / float(DEMO_TICK_RATE)
+
+            try:
+                merge_gap_sec = float(os.getenv("CS2_INSIGHT_ALL_KILLS_WINDOW_MERGE_GAP_SEC", "0.15"))
+            except (TypeError, ValueError):
+                merge_gap_sec = 0.15
+            merge_gap_ticks = max(0, int(merge_gap_sec * DEMO_TICK_RATE))
+
             raw_gap = source_override.get("max_gap_sec") if isinstance(source_override, dict) else None
             if raw_gap is not None and str(raw_gap).strip():
-                max_gap_ticks = max(1, int(float(raw_gap) * DEMO_TICK_RATE))
-            else:
-                max_gap_ticks = _env_int("CS2_INSIGHT_SMART_MAX_GAP_TICKS", int(DEMO_TICK_RATE * 12.0))
-
-            # pacing_override.post_last_sec: trim each merged segment's end to last_kill + post_ticks.
-            # NOTE: pre_first_sec is intentionally NOT applied here.  The baked source_ticks start
-            # is further from the kill (typically ~5s) which provides the engine_burn seek buffer.
-            # Shrinking the start to kill-pre (e.g. kill-1.5s) leaves too little margin for
-            # engine_burn variance and causes the first kill to be missed.  Users control post
-            # trim here; seek robustness is provided by the baked source_ticks pre-roll.
-            def _parse_ovr_ticks(key: str) -> Optional[int]:
-                if not isinstance(source_override, dict):
-                    return None
-                raw = source_override.get(key)
-                if raw is None or not str(raw).strip():
-                    return None
                 try:
-                    return max(0, int(float(raw) * DEMO_TICK_RATE))
+                    all_kills_max_gap_ticks = max(0, int(float(raw_gap) * DEMO_TICK_RATE))
                 except (TypeError, ValueError):
-                    return None
+                    all_kills_max_gap_ticks = _env_int(
+                        "CS2_INSIGHT_SMART_MAX_GAP_TICKS", int(float(DEMO_TICK_RATE) * 12.0)
+                    )
+            else:
+                all_kills_max_gap_ticks = _env_int(
+                    "CS2_INSIGHT_SMART_MAX_GAP_TICKS", int(float(DEMO_TICK_RATE) * 12.0)
+                )
 
-            _ovr_post_ticks = _parse_ovr_ticks("post_last_sec")
+            # 与 source_ticks 索引对齐的击杀 + 回合（source_rounds）；优于仅 clip.kill_ticks 整数列表
+            kill_items = [(int(kt), int(rn)) for _ss, _ee, kt, rn in source_records]
 
-            # Merge loop — track last kill per merged segment for post_last override.
-            # _seg_groups: [seg_s, seg_e, last_kt]
-            _seg_groups: list[list] = []
-            cur_s = cur_e = cur_kt = cur_rn = 0
-            for ss, ee, kt, rn in source_records:
-                if _seg_groups and rn == cur_rn and kt - cur_kt <= max_gap_ticks:
-                    cur_e = max(cur_e, ee)
-                    _seg_groups[-1][1] = cur_e
-                    _seg_groups[-1][2] = kt
-                else:
-                    cur_s, cur_e, cur_rn = ss, ee, rn
-                    _seg_groups.append([ss, ee, kt])
-                    cur_kt = kt
-                    continue
-                cur_kt = kt
+            clip_id = clip.get("clip_id") or clip.get("id")
 
-            for seg_s, seg_e, last_kt in _seg_groups:
-                new_e = seg_e
-                if _ovr_post_ticks is not None:
-                    new_e = last_kt + _ovr_post_ticks
-                    if _comp_max_tick > 0:
-                        new_e = min(new_e, _comp_max_tick)
-                source_segments.append((seg_s, max(seg_s + 1, new_e)))
+            logger.info(
+                "[all_kills_windows] input clip_id=%s kills=%s pre=%.3fs post=%.3fs merge_gap_ticks=%s max_gap_ticks=%s",
+                clip_id,
+                len(kill_items or []),
+                float(pre_first_sec or 0),
+                float(post_last_sec or 0),
+                merge_gap_ticks,
+                all_kills_max_gap_ticks,
+            )
+
+            raw_segments = _build_all_kills_windows(
+                kill_items,
+                pre_first_sec,
+                post_last_sec,
+                DEMO_TICK_RATE,
+                merge_gap_ticks=merge_gap_ticks,
+                max_gap_ticks=all_kills_max_gap_ticks,
+            )
+
+            for seg_s, seg_e in raw_segments:
+                s = max(0, int(seg_s))
+                if _comp_min_start > 0:
+                    s = max(s, _comp_min_start)
+                e = max(s + 1, int(seg_e))
+                if _comp_max_tick > 0:
+                    e = min(e, _comp_max_tick)
+                if e > s:
+                    source_segments.append((s, e))
+
+            logger.info(
+                "[all_kills_windows] output clip_id=%s segments=%s",
+                clip_id,
+                source_segments[:20],
+            )
+            logger.info(
+                "[build_segments] all_kills kill-window segments clip_id=%s pre=%.3fs post=%.3fs count=%s segments=%s",
+                clip_id,
+                float(pre_first_sec or 0),
+                float(post_last_sec or 0),
+                len(source_segments),
+                source_segments[:20],
+            )
+            if source_segments:
+                _log_smart_jump_segment_debug(
+                    clip,
+                    source_segments,
+                    source_override,
+                    pre_sec=float(pre_first_sec or 0),
+                    post_sec=float(post_last_sec or 0),
+                    max_gap_sec=all_kills_max_gap_ticks / float(DEMO_TICK_RATE),
+                    tick_rate=DEMO_TICK_RATE,
+                    has_user_pacing=has_user_pacing,
+                    max_gap_ticks=max(1, int(all_kills_max_gap_ticks)),
+                )
+                logger.info(
+                    "[build_segments] compilation source_ticks clip_id=%s segments=%s",
+                    clip.get("clip_id"),
+                    source_segments,
+                )
+                return source_segments
         else:
-            source_segments = [(ss, ee) for ss, ee, _kt, _rn in source_records]
+            if has_user_pacing and _has_event_anchor_ticks(clip):
+                source_segments = []
+            else:
+                source_segments = [(ss, ee) for ss, ee, _kt, _rn in source_records]
         if source_segments:
             logger.info(
                 "[build_segments] compilation source_ticks clip_id=%s segments=%s",
                 clip.get("clip_id"),
                 source_segments,
+            )
+            _log_smart_jump_segment_debug(
+                clip,
+                source_segments,
+                override,
+                pre_sec=pre_first_sec_eff,
+                post_sec=post_last_sec_eff,
+                max_gap_sec=max_gap_sec_eff,
+                tick_rate=DEMO_TICK_RATE,
+                has_user_pacing=has_user_pacing,
+                max_gap_ticks=_max_gap_ticks_i,
             )
             return source_segments
 
@@ -622,35 +1494,6 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
         if not kills or _death_tick > kills[-1]:
             kills = kills + [_death_tick]
 
-    override = clip.get("pacing_override") or {}
-    if not isinstance(override, dict):
-        override = {}
-
-    def _get_override_ticks(key: str, default_env_key: str, default_sec: float) -> int:
-        val = override.get(key)
-        if val is not None and str(val).strip():
-            return max(0, int(float(val) * DEMO_TICK_RATE))
-        return _env_int(default_env_key, int(DEMO_TICK_RATE * default_sec))
-
-    # pre_first_sec：每个击杀段首杀前预留
-    # post_last_sec：每个击杀段末杀后预留，不是每次击杀后都追加
-    # max_gap_sec：相邻击杀间隔超过该值时拆成新的击杀段
-    PRE_FIRST = _get_override_ticks("pre_first_sec", "CS2_INSIGHT_SMART_PRE_FIRST_TICKS", 1.5)
-    # 击杀段后预留（POST_LAST）：每段末杀后的缓冲；智能跳剪中段与末段相同。需足够长以保证 gototick 后击杀动画可见。
-    POST_LAST = _get_override_ticks("post_last_sec", "CS2_INSIGHT_SMART_POST_LAST_TICKS", 1.5)
-    MAX_GAP = max(1, _get_override_ticks("max_gap_sec", "CS2_INSIGHT_SMART_MAX_GAP_TICKS", 12.0))
-
-    # clip_min_tick = round_freeze_end_tick，防止 seg_start 穿越到上一回合黑屏区域
-    clip_min_tick = max(0, int(clip.get("clip_min_tick") or 0))
-    clip_min_guard_ticks = _get_override_ticks(
-        "clip_min_guard_sec",
-        "CS2_INSIGHT_SMART_CLIP_MIN_GUARD_TICKS",
-        0.35,
-    )
-    clip_min_start_tick = clip_min_tick + clip_min_guard_ticks if clip_min_tick > 0 else 0
-    # clip_max_tick：本回合 demo 安全录制上限（超出则比赛结算界面单向锁定渲染）
-    _cmt_raw = clip.get("clip_max_tick")
-    clip_max_tick = int(_cmt_raw) if _cmt_raw else 0
     logger.info(
         "[build_segments] clip_id=%s round=%s clip_max_tick=%s kills=%s override=%s",
         clip.get("clip_id"),
@@ -660,6 +1503,50 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
         override,
     )
 
+    clip_min_start_for_user_anchor = (
+        clip_min_tick if (has_user_pacing and _is_round_timeline_event_clip(clip)) else clip_min_start_tick
+    )
+
+    if has_user_pacing:
+        post_for_anchor = POST_LAST
+        if (
+            not kills
+            and str(clip.get("timeline_source") or "").strip() == "round_timeline_event"
+            and "post_last_sec" not in override
+        ):
+            post_for_anchor = _env_int(
+                "CS2_INSIGHT_TIMELINE_DEATH_POST_TICKS",
+                int(DEMO_TICK_RATE * 2.0),
+            )
+        post_sec_for_log = post_for_anchor / float(DEMO_TICK_RATE)
+        merged_anchor = _build_event_anchor_segments(
+            clip=clip,
+            pre_ticks=PRE_FIRST,
+            post_ticks=post_for_anchor,
+            max_gap_ticks=_max_gap_ticks_i,
+            clip_min_start_tick=clip_min_start_for_user_anchor,
+            clip_max_end_tick=clip_max_tick,
+            kill_ticks_override=kills if kills else None,
+        )
+        if merged_anchor:
+            _log_smart_jump_segment_debug(
+                clip,
+                merged_anchor,
+                override,
+                pre_sec=pre_first_sec_eff,
+                post_sec=post_sec_for_log,
+                max_gap_sec=max_gap_sec_eff,
+                tick_rate=DEMO_TICK_RATE,
+                has_user_pacing=True,
+                max_gap_ticks=_max_gap_ticks_i,
+            )
+            logger.info(
+                "[build_segments] final_segments clip_id=%s segments=%s",
+                clip.get("clip_id"),
+                merged_anchor,
+            )
+            return merged_anchor
+
     if not kills:
         has_single_segment_override = isinstance(override, dict) and any(
             k in override for k in ("pre_first_sec", "post_last_sec")
@@ -667,22 +1554,30 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
         # 纯死亡锚点（含回合时间线 death 事件）：必须压在 death_tick 附近结束。
         # 若沿用片段整体 end_tick（建议窗 often 为死亡 +4s），CS2 死亡视角约 2s 后会把观战切到
         # 他人，后半段录到的已不是目标画面。
-        dt_only = _clip_death_tick(clip) if not has_single_segment_override else None
+        clip_min_floor = (
+            clip_min_tick
+            if (has_single_segment_override and _is_round_timeline_event_clip(clip))
+            else clip_min_start_tick
+        )
+        dt_only = _clip_death_tick(clip)
         if dt_only is not None:
             anchor_tick = int(dt_only)
             seg_start = max(0, anchor_tick - PRE_FIRST)
-            if clip_min_start_tick > 0:
-                seg_start = max(seg_start, clip_min_start_tick)
+            if clip_min_floor > 0:
+                seg_start = max(seg_start, clip_min_floor)
             val_po = override.get("post_last_sec")
             if val_po is not None and str(val_po).strip():
                 post_ticks = max(0, int(float(val_po) * DEMO_TICK_RATE))
-            elif str(clip.get("timeline_source") or "").strip() == "round_timeline_event":
-                post_ticks = _env_int(
-                    "CS2_INSIGHT_TIMELINE_DEATH_POST_TICKS",
-                    int(DEMO_TICK_RATE * 2.0),
-                )
             else:
-                post_ticks = POST_LAST
+                # round_timeline_event 死亡：与高光同源走本函数，但未显式 post_last 时死后留白默认 2s
+                # （CS2_INSIGHT_TIMELINE_DEATH_POST_TICKS，观战易在 ~2s 内切走）；其它纯死亡锚点用 POST_LAST。
+                if str(clip.get("timeline_source") or "").strip() == "round_timeline_event":
+                    post_ticks = _env_int(
+                        "CS2_INSIGHT_TIMELINE_DEATH_POST_TICKS",
+                        int(DEMO_TICK_RATE * 2.0),
+                    )
+                else:
+                    post_ticks = POST_LAST
             seg_end = anchor_tick + post_ticks
             if clip_max_tick > 0:
                 seg_end = min(seg_end, clip_max_tick)
@@ -695,10 +1590,33 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
                 anchor_tick,
                 segment,
             )
+            _log_smart_jump_segment_debug(
+                clip,
+                [segment],
+                override,
+                pre_sec=pre_first_sec_eff,
+                post_sec=post_ticks / float(DEMO_TICK_RATE),
+                max_gap_sec=max_gap_sec_eff,
+                tick_rate=DEMO_TICK_RATE,
+                has_user_pacing=has_user_pacing,
+                max_gap_ticks=_max_gap_ticks_i,
+            )
             return [segment]
 
         if not has_single_segment_override:
-            return [(start_tick, end_tick)]
+            out = [(start_tick, end_tick)]
+            _log_smart_jump_segment_debug(
+                clip,
+                out,
+                override,
+                pre_sec=pre_first_sec_eff,
+                post_sec=post_last_sec_eff,
+                max_gap_sec=max_gap_sec_eff,
+                tick_rate=DEMO_TICK_RATE,
+                has_user_pacing=has_user_pacing,
+                max_gap_ticks=_max_gap_ticks_i,
+            )
+            return out
 
         anchor_tick = None
         if _death_tick_raw is not None and str(_death_tick_raw).strip():
@@ -710,8 +1628,8 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
             anchor_tick = min(end_tick, start_tick + PRE_ROLL_TICKS)
 
         seg_start = max(0, anchor_tick - PRE_FIRST)
-        if clip_min_start_tick > 0:
-            seg_start = max(seg_start, clip_min_start_tick)
+        if clip_min_floor > 0:
+            seg_start = max(seg_start, clip_min_floor)
         seg_end = anchor_tick + POST_LAST
         if clip_max_tick > 0:
             seg_end = min(seg_end, clip_max_tick)
@@ -723,6 +1641,17 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
             clip.get("clip_id"),
             anchor_tick,
             segment,
+        )
+        _log_smart_jump_segment_debug(
+            clip,
+            [segment],
+            override,
+            pre_sec=pre_first_sec_eff,
+            post_sec=post_last_sec_eff,
+            max_gap_sec=max_gap_sec_eff,
+            tick_rate=DEMO_TICK_RATE,
+            has_user_pacing=has_user_pacing,
+            max_gap_ticks=_max_gap_ticks_i,
         )
         return [segment]
 
@@ -768,7 +1697,8 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
     # 一致，且不得复用 CS2_INSIGHT_SMART_POST_LAST_TICKS 环境变量 —— 否则用户把 env 调小后
     # end_tick <= last_kill + env_ticks 恒为假，会误判为「拆包」而再次拉长到 clip.end_tick（约 3s）。
     _parser_default_tail_ticks = int(float(BUFFER_SECONDS_AFTER) * float(DEMO_TICK_RATE))
-    if merged and end_tick > 0:
+    _parser_default_head_ticks = int(float(BUFFER_SECONDS_BEFORE) * float(DEMO_TICK_RATE))
+    if not has_user_pacing and merged and end_tick > 0:
         ls, le = merged[-1]
         if end_tick > le:
             le_ext = min(end_tick, clip_max_tick) if clip_max_tick > 0 else end_tick
@@ -780,15 +1710,33 @@ def build_smart_jump_segments(clip: dict) -> list[tuple[int, int]]:
                 if not (user_tightened_post and end_within_typical_parser_tail):
                     merged[-1] = (ls, le_ext)
 
-    # 扩展第一段以覆盖 clip start_tick（拆包后击杀）。
-    if merged and start_tick > 0:
+    # 扩展第一段以覆盖 clip.start_tick（极限拆包等：段首需早于「首杀 − pre_first」）。
+    # 若 start_tick 仅落在解析器为高光写的「首杀 − BUFFER_SECONDS_BEFORE」典型窗内，而用户已通过 pacing
+    # 把 pre_first 缩得比该窗更短，则不得再拉长。否则成片 pre 会变成解析器蜡制窗 + pacing 叠层（观感 ~5s+）。
+    if not has_user_pacing and merged and start_tick > 0 and kills:
         fs, fe = merged[0]
         if start_tick < fs:
             fs_ext = max(start_tick, clip_min_start_tick) if clip_min_start_tick > 0 else start_tick
             if fs_ext < fs:
-                merged[0] = (fs_ext, fe)
+                first_kill = int(kills[0])
+                default_parser_head_start = max(0, first_kill - _parser_default_head_ticks)
+                user_tightened_pre = PRE_FIRST < _parser_default_head_ticks
+                start_within_typical_parser_head = start_tick >= default_parser_head_start
+                if not (user_tightened_pre and start_within_typical_parser_head):
+                    merged[0] = (fs_ext, fe)
 
     logger.info("[build_segments] final_segments clip_id=%s segments=%s", clip.get("clip_id"), merged)
+    _log_smart_jump_segment_debug(
+        clip,
+        merged,
+        override,
+        pre_sec=pre_first_sec_eff,
+        post_sec=post_last_sec_eff,
+        max_gap_sec=max_gap_sec_eff,
+        tick_rate=DEMO_TICK_RATE,
+        has_user_pacing=has_user_pacing,
+        max_gap_ticks=_max_gap_ticks_i,
+    )
     return merged
 
 
@@ -2949,6 +3897,17 @@ class OBSDirector:
                 # ★ 核心路径：GSI 验证 + +1 重试（参数见配置 spec_player_verify）
                 # jump_cut_seek=True 时 demo 处于暂停状态，spec_player 被 CS2 静默忽略，
                 # 玩家视角不会切换（仍是上一段的正确视角），跳过 GSI 验证。
+                #
+                # stage2 已 demo_resume 时：若此处不暂停，GSI 轮询（每重试 per_retry_timeout 等）
+                # 期间 demo 在 1× 连续走秒，远超 engine_burn_ticks 估算 → 首段首杀相对 seek 漂移。
+                # （backend.log 常见：resume 与 spec_verify OK 间隔 3–6s，单独即 200–400 tick。）
+                ok_pause_before_spec4 = await asyncio.to_thread(
+                    _inj, ["demo_pause"], skip=True, close=False
+                )
+                if not ok_pause_before_spec4:
+                    logger.warning(
+                        "demo_pause before Stage4 spec_verify failed; demo may drift during GSI poll"
+                    )
                 _spv = self._spec_player_verify
                 _max_retries = max(1, int(_spv.max_retries))
                 _per_retry_t = float(_spv.per_retry_timeout_sec)
@@ -3009,6 +3968,28 @@ class OBSDirector:
             return None
         if jump_cut_seek:
             return bool(ok0 and ok1 and ok4 and ok5)
+        # GSI 路径在 Stage4 前 demo_pause，验证与 hide 阶段 tick 不推进；若此处不 resume，
+        # prepare 返回时 demo 仍暂停 → 调用方 pause_bracket 再发 demo_pause 可能被引擎当作
+        # 「开关」误解除暂停，或 StartRecord 后短时画面停在 pause 态（观感成片头/首杀前数秒定格）。
+        # 在 POST_HIDE / PRE_RECORD 之后恢复播放，由调用方 pause_bracket 从 playing 可靠切到 pause。
+        if resume_on:
+            # hideconsole 后控制台已关：skip=True 时 WM_CHAR 常被主窗丢弃（与 jump_cut 段间注释一致），
+            # 引擎仍停在 spec 前 demo_pause → 开录后整段 seg0 墙钟内画面不推 tick。
+            ok_tail = await asyncio.to_thread(
+                inject_console_sequence,
+                ["demo_timescale 1", "demo_resume"],
+                skip_console_toggle=False,
+                close_console=True,
+            )
+            if ok_tail:
+                logger.info(
+                    "Injected prepare tail: demo_timescale 1 + demo_resume "
+                    "(skip_console_toggle=False; after spec_verify; leave demo playing)"
+                )
+            else:
+                logger.warning(
+                    "Prepare tail demo_timescale+demo_resume failed; demo may still be paused from spec_verify stage"
+                )
         return bool(ok0 and ok1 and ok2 and ok4 and ok5)
 
     async def _execute_single_clip_recording(
@@ -3049,6 +4030,8 @@ class OBSDirector:
         has_single_segment_override = bool(_raw_po) and any(
             k in _raw_po for k in ("pre_first_sec", "post_last_sec")
         )
+        has_user_pacing_rec = "pre_first_sec" in _raw_po or "post_last_sec" in _raw_po
+        _is_tl_single = _is_round_timeline_event_clip(clip)
         use_smart_jump = len(segments) > 1
         post_start_seg0 = 0.0
         first_seg_extra = 0.0
@@ -3083,6 +4066,13 @@ class OBSDirector:
                     burn_sec = max(0.85, burn_sec - 1.35)
             elif clip_idx > 0:
                 burn_sec = max(0.85, burn_sec - 1.35)
+            if (
+                clip_idx == 0
+                and _is_tl_single
+                and _extract_death_tick_for_segment(clip) is not None
+                and not _extract_kill_ticks_for_segment(clip)
+            ):
+                burn_sec += self._env_float("CS2_INSIGHT_TIMELINE_DEATH_FIRST_CLIP_BURN_PAD_SEC", "0.35")
         else:
             burn_sec = 0.0
         engine_burn_ticks = int(burn_sec * TICK_RATE)
@@ -3101,14 +4091,22 @@ class OBSDirector:
         _kf_delay_raw = (
             max(0.0, _KEYFRAME_PRE_FIRST_SEC - _target_pre_first_sec) if _apply_kf_delay else 0.0
         )
-        # clip_idx == 0: engine_burn が有効なら prepare 後 demo ≈ ss0 のため kf_delay 不要。
+        # clip_idx == 0: 击杀高光下 engine_burn 后 demo ≈ ss0、kf_delay 易叠床架屋故置 0。
+        # 死亡合集（all_deaths 等）把锚点 tick 放在 kill_ticks 里 → has_kill_timeline 亦为 True，
+        # 若仍走本分支会误跳过 kf_delay，整场录制的首段死亡常见片头缺/偏移；故排除 _is_death_compilation。
         # clip_idx > 0 kill clips: 実測で prepare 後 demo ≈ ss0 - 1.84s 付近にあり（キーフレームずれによる
         # D_excess ≈ -2s）、kf_delay cap ≈ 1.84s でちょうど 2s 予留になる。
         # death-only clips (kill_ticks なし): キーフレームずれが clip 位置依存で D_excess ≈ 0 の場合が多く、
         # delay を加えると death_tick を越えて録制開始してしまう（プレイヤーが倒れた後になる）。
         # engine_burn のみで ss0 に到達する前提で delay = 0 とし、もし D_excess が大きい場合は
         # 余分な片頭（最大数秒）が付くが、死亡イベントを取り逃すよりはマシ。
-        if clip_idx == 0 and resume_on and engine_burn_ticks > 0:
+        if (
+            clip_idx == 0
+            and resume_on
+            and engine_burn_ticks > 0
+            and has_kill_timeline
+            and not _is_death_compilation(clip)
+        ):
             delay_pre_sec = 0.0
         elif has_death_timeline and not has_kill_timeline:
             # death-only: D_excess ≈ 0 → applying kf_delay would push recording past death_tick
@@ -3136,18 +4134,42 @@ class OBSDirector:
         def _estimated_record_start_tick(seek: int) -> int:
             return max(0, int(seek)) + max(0, int(engine_burn_ticks))
 
+        _pause_demo_before_start_bracket = (
+            sys.platform == "win32"
+            and os.environ.get("CS2_INSIGHT_PAUSE_DEMO_BEFORE_START_RECORD", "1").strip().lower()
+            not in ("0", "false", "no")
+        )
+        # StartRecord 后若 PauseRecord 再注入 demo_resume：demo 在「OBS 不写盘」期间仍会走秒，
+        # 首帧相对 seg 起点晚 ~0.4–0.7s，首杀前预留（如 1.5s）观感变短。额外提前 seek 补偿。
+        _post_start_obs_guard_slip_ticks = 0
+        if (
+            _pause_demo_before_start_bracket
+            and delay_pre_sec <= 0.05
+            and (use_smart_jump or has_kill_timeline or has_single_segment_override or has_death_timeline)
+        ):
+            _post_start_obs_guard_slip_ticks = _env_int(
+                "CS2_INSIGHT_POST_START_OBS_GUARD_SLIP_TICKS",
+                int(float(TICK_RATE) * 0.55),
+            )
+
         if use_smart_jump:
             # 补偿：往前多跳 engine_burn_ticks，确保 OBS 开始录制时刚好到达逻辑起点
-            seek_tick = max(0, segments[0][0] - engine_burn_ticks)
-            meta_record_start_tick = _estimated_record_start_tick(seek_tick)
+            ss0_head = max(0, int(segments[0][0]))
+            seek_tick = max(0, ss0_head - int(engine_burn_ticks) - int(_post_start_obs_guard_slip_ticks))
+            meta_record_start_tick = _estimated_record_start_tick(
+                seek_tick + int(_post_start_obs_guard_slip_ticks)
+            )
             meta_record_end_tick = int(segments[-1][1])
             planned_wall_seconds = post_start_seg0 + first_seg_extra + sum(
                 max(0.0, (ee - ss) / float(TICK_RATE)) for ss, ee in segments
             )
         elif has_kill_timeline or has_single_segment_override or has_death_timeline:
             ss0, ee0 = segments[0]
-            seek_tick = max(0, ss0 - engine_burn_ticks)
-            meta_record_start_tick = _estimated_record_start_tick(seek_tick)
+            ss0 = max(0, int(ss0))
+            seek_tick = max(0, ss0 - int(engine_burn_ticks) - int(_post_start_obs_guard_slip_ticks))
+            meta_record_start_tick = _estimated_record_start_tick(
+                seek_tick + int(_post_start_obs_guard_slip_ticks)
+            )
             meta_record_end_tick = int(ee0)
             # 末杀 + post_last_sec 对应 ee0；主段 sleep 满此墙钟后立刻 PauseRecord，不再追加尾垫
             # （旧 +0.2s 会在预留窗后又多录一截再暂停，与「击杀后预留结束即暂停」语义不一致）。
@@ -3163,6 +4185,16 @@ class OBSDirector:
                 # 整回合固定 tick 窗口：墙钟略长于纯 tick 换算，抵消准备阶段少量漂移（常量，不读环境变量）。
                 legacy_duration += 0.35
             planned_wall_seconds = legacy_duration
+
+        if _post_start_obs_guard_slip_ticks > 0:
+            logger.info(
+                "[record] post_start_obs_guard_slip_ticks=%s clip=%s delay_pre_sec=%.3f smart_jump=%s seek_tick=%s",
+                _post_start_obs_guard_slip_ticks,
+                clip_id,
+                float(delay_pre_sec),
+                use_smart_jump,
+                seek_tick,
+            )
 
         self._set_state(
             DirectorState.SEEKING,
@@ -3195,6 +4227,7 @@ class OBSDirector:
         # CS2_INSIGHT_JC_BURN_SEC（默认 0.9）可微调，覆盖 demo_resume 注入本身的阻塞耗时差异。
         _jc_burn_sec = self._env_float("CS2_INSIGHT_JC_BURN_SEC", "0.9")
         _jc_burn_ticks = int(_jc_burn_sec * TICK_RATE)
+        _jc_burn_sec_capped = max(0.0, min(float(_jc_burn_ticks) / float(TICK_RATE), 0.8))
         record_started_at_wall: Optional[float] = None
         pre_record_video_paths: set[str] = set()
         stop_record_output_path: Optional[Path] = None
@@ -3311,12 +4344,36 @@ class OBSDirector:
                 and os.environ.get("CS2_INSIGHT_PAUSE_DEMO_BEFORE_START_RECORD", "1").strip().lower()
                 not in ("0", "false", "no")
             )
+
+            async def _post_start_record_demo_resume_with_obs_guard() -> bool:
+                """开录后需 `~` 打开控制台时，先 PauseRecord（若支持）再注入，避免控制台 UI 进成片。"""
+                obs_console_guard = False
+                if pause_bracket and _obs_pause():
+                    obs_console_guard = True
+                elif pause_bracket:
+                    logger.info(
+                        "[record] post-StartRecord demo_resume: OBS PauseRecord unavailable; "
+                        "console inject may flash briefly in output"
+                    )
+                try:
+                    return bool(
+                        await asyncio.to_thread(
+                            inject_console_sequence,
+                            ["demo_timescale 1", "demo_resume"],
+                            skip_console_toggle=False,
+                            close_console=True,
+                        )
+                    )
+                finally:
+                    if obs_console_guard:
+                        _obs_resume()
+
             if pause_bracket:
                 ok_dp0 = await asyncio.to_thread(
                     inject_console_sequence,
                     ["demo_pause"],
-                    skip_console_toggle=True,
-                    close_console=False,
+                    skip_console_toggle=False,
+                    close_console=True,
                 )
                 if not ok_dp0:
                     logger.warning("demo_pause before StartRecord failed; pre-roll may be shortened")
@@ -3338,9 +4395,9 @@ class OBSDirector:
             if pause_bracket and delay_pre_sec > 0.05:
                 ok_dr_pre = await asyncio.to_thread(
                     inject_console_sequence,
-                    ["demo_resume"],
-                    skip_console_toggle=True,
-                    close_console=False,
+                    ["demo_timescale 1", "demo_resume"],
+                    skip_console_toggle=False,
+                    close_console=True,
                 )
                 if ok_dr_pre:
                     demo_resumed_before_record = True
@@ -3366,14 +4423,12 @@ class OBSDirector:
 
             radar_post_start_sec = 0.0  # 从 StartRecord 到 demo 实际开始推 tick 的实测时长
             if pause_bracket and not demo_resumed_before_record:
-                ok_dr0 = await asyncio.to_thread(
-                    inject_console_sequence,
-                    ["demo_resume"],
-                    skip_console_toggle=True,
-                    close_console=False,
-                )
+                ok_dr0 = await _post_start_record_demo_resume_with_obs_guard()
                 if not ok_dr0:
-                    logger.warning("demo_resume immediately after StartRecord failed")
+                    logger.warning(
+                        "demo_resume immediately after StartRecord failed "
+                        "(batch demo_timescale 1 + demo_resume, console toggled)"
+                    )
                 await asyncio.sleep(0.08)
                 radar_post_start_sec = time.time() - record_started_at_wall
             elif pause_bracket and demo_resumed_before_record:
@@ -3415,8 +4470,34 @@ class OBSDirector:
             if pause_bracket and demo_resumed_before_record and delay_pre_sec > 0.05:
                 _rec_wall_trim += float(delay_pre_sec)
 
+            _rec_wall_trim_eff = (
+                0.0 if (has_user_pacing_rec and _is_tl_single) else _rec_wall_trim
+            )
+
             if not use_smart_jump:
-                await self._sleep_abortable(max(0.0, float(legacy_duration) - _rec_wall_trim))
+                _seg0s, _seg0e = segments[0] if segments else (0, 0)
+                _raw_seg_dur = (
+                    max(0.0, (_seg0e - _seg0s) / float(TICK_RATE)) if segments else 0.0
+                )
+                _eff_rec = max(0.0, float(legacy_duration) - _rec_wall_trim_eff)
+                logger.info(
+                    "[record-segment-debug] clip_id=%s clip_idx=%s segment_idx=%s "
+                    "segment_start=%s segment_end=%s duration_sec=%.3f "
+                    "engine_burn_sec=%.3f rec_wall_trim=%.3f effective_record_sec=%.3f "
+                    "is_timeline_event=%s has_user_pacing=%s",
+                    clip_id,
+                    clip_idx,
+                    0,
+                    _seg0s,
+                    _seg0e,
+                    _raw_seg_dur,
+                    float(burn_sec),
+                    float(_rec_wall_trim),
+                    _eff_rec,
+                    _is_timeline_event_clip(clip),
+                    has_user_pacing_rec,
+                )
+                await self._sleep_abortable(_eff_rec)
             else:
                 await self._sleep_abortable(post_start_seg0)
                 jump_cut_active = True
@@ -3449,21 +4530,68 @@ class OBSDirector:
                     self._ws.call(obs_requests.StartRecord())
                     _mark_obs("start")
                     if pause_bracket:
-                        ok_dr0 = await asyncio.to_thread(
-                            inject_console_sequence,
-                            ["demo_resume"],
-                            skip_console_toggle=True,
-                            close_console=False,
-                        )
+                        ok_dr0 = await _post_start_record_demo_resume_with_obs_guard()
                         if not ok_dr0:
                             logger.warning("demo_resume after split StartRecord failed")
                         await asyncio.sleep(0.08)
 
                 for si, (seg_start, seg_end) in enumerate(segments):
                     seg_dur = max(0.0, (seg_end - seg_start) / float(TICK_RATE))
+                    _seg_jc_extra = _jc_burn_sec_capped if len(segments) > 1 else 0.0
                     if si == 0:
                         # 首段与单段同理：StartRecord 前/刚开录时 demo 已先走 _rec_wall_trim 秒。
-                        seg0 = max(0.08, seg_dur + float(first_seg_extra) - _rec_wall_trim)
+                        # 勿用 meta_record_start_tick 缩短本 sleep：engine_burn 为保守上界时 mst 常高于
+                        # 实际开录 tick，会误剪短首段导致首杀未进成片（单段路径用 mst 是因无「整段 tick 窗」可对照）。
+                        # 多段 jump-cut 时 seek 提前 jc_burn_ticks，墙钟 sleep 须加回 jc burn，否则末段 post 被吃掉。
+                        seg0 = max(
+                            0.08,
+                            seg_dur + float(first_seg_extra) - _rec_wall_trim_eff + _seg_jc_extra,
+                        )
+                        logger.info(
+                            "[jumpcut-debug] clip_id=%s segment_idx=%s/%s "
+                            "seg_start=%s seg_end=%s seg_dur=%.3f "
+                            "jc_burn_ticks=%s jc_burn_sec=%.3f seg_sleep=%.3f "
+                            "kill_ticks=%s post_sec=%.3f",
+                            clip_id,
+                            si + 1,
+                            len(segments),
+                            seg_start,
+                            seg_end,
+                            float(seg_dur),
+                            _jc_burn_ticks,
+                            float(_seg_jc_extra),
+                            float(seg0),
+                            _extract_kill_ticks_for_segment(clip),
+                            _pacing_post_last_sec_effective(clip),
+                        )
+                        logger.info(
+                            "[smart_jump] clip=%s seg=0/%d tick_window=[%s,%s] seg_dur_sec=%.4f "
+                            "rec_wall_trim_sec=%.4f seg0_sleep_sec=%.4f",
+                            clip_id,
+                            len(segments),
+                            seg_start,
+                            seg_end,
+                            float(seg_dur),
+                            float(_rec_wall_trim_eff),
+                            float(seg0),
+                        )
+                        logger.info(
+                            "[record-segment-debug] clip_id=%s clip_idx=%s segment_idx=%s "
+                            "segment_start=%s segment_end=%s duration_sec=%.3f "
+                            "engine_burn_sec=%.3f rec_wall_trim=%.3f effective_record_sec=%.3f "
+                            "is_timeline_event=%s has_user_pacing=%s",
+                            clip_id,
+                            clip_idx,
+                            0,
+                            seg_start,
+                            seg_end,
+                            float(seg_dur),
+                            float(burn_sec),
+                            float(_rec_wall_trim),
+                            float(seg0),
+                            _is_timeline_event_clip(clip),
+                            has_user_pacing_rec,
+                        )
                         await self._sleep_abortable(seg0)
                         continue
                     if not jump_cut_active:
@@ -3592,7 +4720,25 @@ class OBSDirector:
                         await self._sleep_abortable(settle_between)
                     finally:
                         _obs_resume()
-                    await self._sleep_abortable(seg_dur)
+                    seg_sleep = seg_dur + _seg_jc_extra
+                    logger.info(
+                        "[jumpcut-debug] clip_id=%s segment_idx=%s/%s "
+                        "seg_start=%s seg_end=%s seg_dur=%.3f "
+                        "jc_burn_ticks=%s jc_burn_sec=%.3f seg_sleep=%.3f "
+                        "kill_ticks=%s post_sec=%.3f",
+                        clip_id,
+                        si + 1,
+                        len(segments),
+                        seg_start,
+                        seg_end,
+                        float(seg_dur),
+                        _jc_burn_ticks,
+                        float(_seg_jc_extra),
+                        float(seg_sleep),
+                        _extract_kill_ticks_for_segment(clip),
+                        _pacing_post_last_sec_effective(clip),
+                    )
+                    await self._sleep_abortable(seg_sleep)
 
             # ── 主录制墙钟结束后立刻 PauseRecord，再按需 demo_pause ─────────────
             # 击杀后预留（post_last）已折合进 legacy_duration / 智能跳剪末段 seg_dur；
@@ -3629,7 +4775,7 @@ class OBSDirector:
                 f"{_va_lk_lin_b:.4f}" if _va_lk_lin_b is not None else "None",
             )
             if not use_smart_jump:
-                _main_sleep_used = max(0.0, float(legacy_duration) - float(_rec_wall_trim))
+                _main_sleep_used = max(0.0, float(legacy_duration) - float(_rec_wall_trim_eff))
                 logger.info(
                     "[main-pov-bridge] clip=%s phase=main_sleep_done smart_jump=0 mono=%.3f "
                     "legacy_duration_sec=%.4f rec_wall_trim_sec=%.4f main_sleep_sec=%.4f "
@@ -3637,7 +4783,7 @@ class OBSDirector:
                     clip_id,
                     _bridge_t0,
                     float(legacy_duration),
-                    float(_rec_wall_trim),
+                    float(_rec_wall_trim_eff),
                     _main_sleep_used,
                     segments,
                     meta_record_start_tick,
@@ -3699,12 +4845,26 @@ class OBSDirector:
             # 高光片段：追加每位受害者死亡前后的视角；失误片段：追加击杀者视角。
             # 开关及独立时序参数均来自 clip.pacing_override（由队列抽屉写入）。
             # 固定 tick 分段（解析高光/合集）时禁用节奏覆写，但回合时间线入队片段仍允许受害者/击杀者 POV。
-            _vpo = clip.get("pacing_override") or {}
+            _vpo = dict(clip.get("pacing_override") or {})
             _tl_src = str(clip.get("timeline_source") or "").strip()
             _is_round_timeline = _tl_src.startswith("round_timeline")
             if clip.get("fixed_segment_pacing") and not _is_round_timeline:
                 _vpo = {}
             if bool(_vpo.get("victim_pov", False)) or bool(_vpo.get("killer_pov", False)):
+                logger.info(
+                    "[pov-debug] clip_id=%s category=%s timeline_source=%s "
+                    "timeline_record_kind=%s vpo=%s victims=%s killer_name=%s "
+                    "kill_ticks=%s death_tick=%s",
+                    clip_id,
+                    clip.get("category"),
+                    clip.get("timeline_source"),
+                    clip.get("timeline_record_kind"),
+                    _vpo,
+                    clip.get("victims"),
+                    clip.get("killer_name"),
+                    _extract_kill_ticks_for_segment(clip),
+                    _extract_death_tick_for_segment(clip),
+                )
                 _clip_cat   = str(clip.get("category") or "")
                 _is_fail_pov = _clip_cat == "fail"
                 _default_pov_pre = self._env_float(
@@ -3722,35 +4882,29 @@ class OBSDirector:
                 _want_killer_pov = bool(_vpo.get("killer_pov", False)) or (
                     bool(_vpo.get("victim_pov", False)) and _clip_cat == "fail"
                 )
-                # 每个 pair 形如 (name, kill_tick, next_kill_tick or None)；
-                # next_kill_tick 用于把"中间受害者"的录制窗口提前关掉，
-                # 避免同 killer 的下一颗子弹打死人触发 CS2 spec 镜头被抢到 killer 身上。
-                _vic_pairs = []
-                if _clip_cat == "fail":
-                    # 击杀者视角：以玩家死亡帧为基准（单段，无后续 kill 联动）
-                    _killer_name = str(clip.get("killer_name") or "").strip()
-                    _death_t     = clip.get("death_tick")
-                    if _want_killer_pov and _killer_name and _death_t is not None:
-                        _vic_pairs.append((_killer_name, int(_death_t), None, "killer"))
-                else:
-                    _vk_ticks  = _clip_kill_ticks_in_order(clip)
-                    if _want_victim_pov:
-                        # 受害者视角（高光/合集片段）：按 kill_ticks 顺序逐一追加
-                        _vic_list  = clip.get("victims") or []
-                        for _i, (_vn, _vt) in enumerate(zip(_vic_list, _vk_ticks)):
-                            _nxt = int(_vk_ticks[_i + 1]) if _i + 1 < len(_vk_ticks) else None
-                            _vic_pairs.append((_vn, int(_vt), _nxt, "victim"))
-                    if _want_killer_pov:
-                        _killer_list = clip.get("killers") or []
-                        if not _killer_list:
-                            _fallback_killer = (
-                                str(clip.get("_spec_name") or "").strip()
-                                or str(clip.get("target_player") or "").strip()
-                                or str(spectator_name or "").strip()
-                            )
-                            _killer_list = [_fallback_killer] * len(_vk_ticks)
-                        for _kn, _kt in zip(_killer_list, _vk_ticks):
-                            _vic_pairs.append((_kn, int(_kt), None, "killer"))
+                _pov_pair_dicts = _build_pov_pairs_for_clip(
+                    clip,
+                    want_victim_pov=_want_victim_pov,
+                    want_killer_pov=_want_killer_pov,
+                    spectator_name=spectator_name,
+                )
+                logger.info(
+                    "[pov-debug] clip_id=%s want_victim=%s want_killer=%s pov_pairs=%s",
+                    clip_id,
+                    _want_victim_pov,
+                    _want_killer_pov,
+                    _pov_pair_dicts,
+                )
+                _vic_pairs: list[tuple[Any, ...]] = []
+                for p in _pov_pair_dicts:
+                    _nm = str(p.get("player_name") or "").strip()
+                    if not _nm:
+                        continue
+                    _pk = str(p.get("kind") or "")
+                    _pov_kind = "victim" if _pk == "victim" else "killer"
+                    _nxt = p.get("next_kill_tick")
+                    _nxt_i = int(_nxt) if _nxt is not None else None
+                    _vic_pairs.append((_nm, int(p["tick"]), _nxt_i, _pov_kind))
                 _clip_min   = max(0, int(clip.get("clip_min_tick") or 0))
                 _clip_max   = int(clip.get("clip_max_tick") or 0)
                 _pov_post_resume_delay = self._env_float("CS2_INSIGHT_POST_OBS_RESUME_DEMO_DELAY", "0.25")
