@@ -238,7 +238,7 @@ export default function RecordWarmupModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="relative flex max-h-[min(96vh,1080px)] w-full max-w-[min(92vw,1400px)] flex-col overflow-hidden rounded-xl border border-white/[0.1] bg-cs2-bg-card shadow-2xl">
+      <div className="relative flex max-h-[min(96vh,1080px)] w-full max-w-[min(92vw,1400px)] flex-col overflow-hidden rounded-xl border border-cs2-border-subtle bg-cs2-bg-card shadow-2xl">
         <button
           type="button"
           onClick={onClose}

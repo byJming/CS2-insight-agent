@@ -93,7 +93,7 @@ function PacingSliderRow({
         />
       </div>
       {hint ? (
-        <p className="text-[9px] font-normal leading-snug text-cs2-text-muted">{hint}</p>
+        <p className="text-[10px] font-normal leading-snug text-cs2-text-muted">{hint}</p>
       ) : null}
     </div>
   );
@@ -123,7 +123,7 @@ export function PacingMicroPanel({ item, updateItemPacing }) {
   return (
     <div className="space-y-3 rounded border border-cs2-border bg-cs2-bg-input/50 p-2">
       <div className="border-b border-cs2-border pb-2">
-        <p className="mb-2 flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider text-cs2-text-muted">
+        <p className="mb-2 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-cs2-text-muted">
           <Settings className="h-3 w-3" /> 基础参数
         </p>
         <div className="space-y-3">
@@ -246,7 +246,7 @@ export function PovSection({ item, updateItemPacing }) {
               </span>
             ) : null}
             {povEnabled && (
-              <span className="ml-auto font-mono text-[9px] text-cyan-400/70">
+              <span className="ml-auto font-mono text-[9px] text-cs2-cyan-on-surface/70">
                 -{vicPre.toFixed(1)}s / +{vicPost.toFixed(1)}s
               </span>
             )}
@@ -489,7 +489,7 @@ export function GlobalPacingPanel({
               <span
                 className={
                   "shrink-0 font-mono tabular-nums text-[9px] " +
-                  (allVictimPovOn ? "text-cs2-text-secondary/90" : "text-cyan-400/80")
+                  (allVictimPovOn ? "text-cs2-text-secondary/90" : "text-cs2-cyan-on-surface/80")
                 }
               >
                 ({victimPovEligible})
@@ -537,7 +537,7 @@ export function GlobalPacingPanel({
       <button
         type="button"
         onClick={resetGlobalPacing}
-        className="mt-2 flex items-center gap-1 text-[9px] text-cs2-text-muted hover:text-cs2-text-secondary"
+        className="mt-2 flex items-center gap-1 text-[10px] text-cs2-text-muted hover:text-cs2-text-secondary"
       >
         <RotateCcw className="h-2.5 w-2.5" /> 恢复后端默认值
       </button>

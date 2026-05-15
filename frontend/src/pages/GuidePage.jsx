@@ -383,7 +383,7 @@ function FaqAccordion() {
               {open && (
                 <div className="border-t border-cs2-border-subtle px-4 py-3">
                   {Array.isArray(a) ? (
-                    <ul className="list-inside list-disc space-y-1.5 text-[12px] leading-relaxed text-cs2-text-secondary marker:text-zinc-600">
+                    <ul className="list-inside list-disc space-y-1.5 text-[12px] leading-relaxed text-cs2-text-secondary marker:text-cs2-text-muted">
                       {a.map((line, j) => (
                         <li key={j}>{line}</li>
                       ))}

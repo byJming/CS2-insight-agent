@@ -85,7 +85,7 @@ export default function ExperimentalPovSection({
               <option value="-1">隐藏雷达（cl_drawhud_force_radar -1）</option>
               <option value="0">显示雷达（cl_drawhud_force_radar 0）</option>
             </select>
-            <span className="mt-1 block text-[9px] leading-relaxed text-cs2-text-muted">
+            <span className="mt-1 block text-[10px] leading-relaxed text-cs2-text-muted">
               当前 POV 资源未改雷达样式时，可隐藏雷达或按游戏默认显示。
             </span>
           </label>
@@ -99,7 +99,7 @@ export default function ExperimentalPovSection({
             />
             <span className="min-w-0 text-[11px] leading-snug text-cs2-text-secondary">
               <span className="font-semibold text-cs2-text-primary">局内玩家显示（存活人数）</span>
-              <span className="mt-0.5 block text-[9px] leading-relaxed text-cs2-text-muted">
+              <span className="mt-0.5 block text-[10px] leading-relaxed text-cs2-text-muted">
                 <code className="text-cs2-accent/90">cl_teamcounter_playercount_instead_of_avatars</code>
                 ：勾选后 HUD 正上方为<strong className="text-cs2-text-secondary">敌我存活人数</strong>
                 （可降低 pov.vpk 下敌方头像旁血量信息干扰）；取消勾选为<strong className="text-cs2-text-secondary">双方十人头像</strong>。
