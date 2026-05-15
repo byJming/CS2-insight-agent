@@ -255,7 +255,7 @@ export default function CommonParamsModal({
               <div className="mb-2 flex min-h-[3rem] w-full overflow-hidden rounded-md">
                 <div
                   style={{ flex: preFlex }}
-                  className="flex min-w-0 flex-col justify-center border-r border-black/30 bg-gradient-to-br from-cs2-accent/35 to-cs2-accent/10 px-2 py-1.5"
+                  className="flex min-w-0 flex-col justify-center border-r border-cs2-border-subtle bg-gradient-to-br from-cs2-accent/35 to-cs2-accent/10 px-2 py-1.5"
                 >
                   <span className="text-[10px] font-bold uppercase tracking-wide text-cs2-text-primary/90">
                     击杀段前预留
@@ -264,7 +264,7 @@ export default function CommonParamsModal({
                 </div>
                 <div
                   style={{ flex: midFlex }}
-                  className="flex min-w-[5.5rem] flex-col items-center justify-center border-r border-black/30 bg-cs2-bg-input px-2 py-1.5 text-center"
+                  className="flex min-w-[5.5rem] flex-col items-center justify-center border-r border-cs2-border-subtle bg-cs2-bg-input px-2 py-1.5 text-center"
                 >
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-cs2-text-secondary">
                     精彩片段
@@ -340,7 +340,7 @@ export default function CommonParamsModal({
             title="镜头与 POV"
             subtitle="受害者 / 击杀者追加视角、FOV 与持枪模型、实验性 POV；入队默认与解析名单类型相关。"
             defaultOpen
-            accentClass="ring-1 ring-white/[0.04]"
+            accentClass="ring-1 ring-cs2-border-subtle"
           >
             <div className="mb-4 grid gap-4 md:grid-cols-2">
               <div className="rounded-xl border-l-4 border-cyan-500/55 bg-cs2-surface-1 p-4">
@@ -440,7 +440,7 @@ export default function CommonParamsModal({
             <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-cs2-text-muted">
               视野、持枪与实验性 POV
             </p>
-            <div className="mb-5 rounded-xl border border-amber-500/30 bg-gradient-to-br from-cs2-surface-1 via-black/40 to-black/60 p-4 shadow-md">
+            <div className="mb-5 rounded-xl border border-amber-500/30 bg-gradient-to-br from-cs2-surface-1 to-cs2-surface-2 p-4 shadow-md">
               <div className="mb-3 flex flex-wrap items-center gap-2">
                 <span className="rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-cs2-amber-on-surface">
                   实验性
@@ -776,7 +776,7 @@ export default function CommonParamsModal({
 
   return (
     <div
-      className="fixed inset-0 z-[95] flex items-center justify-center bg-black/70 px-3 py-6 backdrop-blur-sm sm:px-4"
+      className="fixed inset-0 z-[95] flex items-center justify-center bg-cs2-bg-overlay px-3 py-6 backdrop-blur-sm sm:px-4"
       role="dialog"
       aria-modal="true"
       aria-labelledby="common-params-title"

@@ -19,12 +19,13 @@ export default function ProgressBar({
   onDismissRef.current = onDismiss;
 
   useEffect(() => {
-    if (!autoDismissAfterMs || autoDismissAfterMs <= 0 || !text?.trim()) return;
+    const effDismissMs = autoDismissAfterMs || (text?.includes("失败") || text?.includes("错误") || text?.includes("报错") ? 0 : 4500);
+    if (!effDismissMs || effDismissMs <= 0 || !text?.trim()) return;
     // 解析读条 / 批量录制进行中时不计时，避免误关或中途消失
     if (active || batchRecording) return;
     const id = window.setTimeout(() => {
       onDismissRef.current?.();
-    }, autoDismissAfterMs);
+    }, effDismissMs);
     return () => window.clearTimeout(id);
   }, [text, autoDismissAfterMs, active, batchRecording]);
 
